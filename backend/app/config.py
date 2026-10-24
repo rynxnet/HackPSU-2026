@@ -11,11 +11,15 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/researchide"
     SYNC_DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/researchide"
 
-    # S3 / MinIO
-    S3_ENDPOINT_URL: str = "http://localhost:9000"
-    S3_PUBLIC_URL: str = "http://localhost:9000"
-    S3_ACCESS_KEY: str = "minioadmin"
-    S3_SECRET_KEY: str = "minioadmin"
+    # Storage: "local" (default for lightweight/dev) or "s3"
+    STORAGE_BACKEND: str = "local"
+    LOCAL_STORAGE_DIR: str = "/app/storage"
+
+    # S3 / MinIO (optional when STORAGE_BACKEND=s3)
+    S3_ENDPOINT_URL: Optional[str] = "http://localhost:9000"
+    S3_PUBLIC_URL: Optional[str] = "http://localhost:9000"
+    S3_ACCESS_KEY: Optional[str] = "minioadmin"
+    S3_SECRET_KEY: Optional[str] = "minioadmin"
     S3_BUCKET_NAME: str = "researchide"
     S3_REGION: str = "us-east-1"
 
