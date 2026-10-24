@@ -23,9 +23,17 @@ async def get_current_user_optional(
         extracted_token = request.cookies.get(settings.SESSION_COOKIE_NAME)
 
     if not extracted_token:
-        # For development ease, fallback to demo/admin user if no token provided
+        # For development / single-user ease, fallback to demo/admin user
         result = await db.execute(select(User).limit(1))
         demo_user = result.scalar_one_or_none()
+        if not demo_user:
+            demo_user = User(
+                email="researcher@researchide.org",
+                name="Dr. Alex Rivera"
+            )
+            db.add(demo_user)
+            await db.commit()
+            await db.refresh(demo_user)
         return demo_user
 
     user_id = decode_access_token(extracted_token)
