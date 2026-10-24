@@ -20,7 +20,8 @@ class Paper(Base):
     file_size_bytes = Column(BigInteger, nullable=True)
     page_count = Column(Integer, nullable=True)
     parsing_status = Column(String(50), default="pending") # pending, processing, completed, failed
-    metadata = Column(JSONB, default=dict) # references, figures, extra headers
+    # "metadata" is reserved on SQLAlchemy declarative models, so map the column under another attribute name
+    paper_metadata = Column("metadata", JSONB, default=dict) # references, figures, extra headers
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -57,7 +58,7 @@ class PaperChunk(Base):
     chunk_index = Column(Integer, nullable=False)
     chunk_text = Column(Text, nullable=False)
     token_count = Column(Integer, nullable=True)
-    embedding = Column(Vector(768), nullable=True) # Gemini text-embedding-004 dimension
+    embedding = Column(Vector(768), nullable=True) # gemini-embedding-001 truncated to 768 dims (output_dimensionality)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     paper = relationship("Paper", back_populates="chunks")

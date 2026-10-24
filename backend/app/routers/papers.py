@@ -5,13 +5,17 @@ from sqlalchemy import select
 from uuid import UUID, uuid4
 from typing import List
 import io
+import logging
+from urllib.parse import quote
+
+logger = logging.getLogger(__name__)
 
 from app.database import get_db, AsyncSessionLocal
 from app.models.user import User
 from app.models.project import Project
 from app.models.paper import Paper, PaperSection
 from app.schemas.paper import PaperResponse, PaperDetailResponse, PaperImportDoiRequest, SectionResponse
-from app.services.auth_service import get_current_user
+from app.services.auth_service import get_current_user, get_owned_project, get_owned_resource
 from app.services.storage_service import storage_service
 from app.services.paper_ingestion import paper_ingestion_service
 from app.services.doi_arxiv_service import doi_arxiv_service
@@ -22,8 +26,9 @@ async def background_ingest_pipeline(paper_id: UUID, pdf_bytes: bytes, pre_meta=
     async with AsyncSessionLocal() as db:
         try:
             await paper_ingestion_service.ingest_paper(db, paper_id, pdf_bytes, pre_meta)
-        except Exception as e:
-            pass
+        except Exception:
+            # ingest_paper already marks the paper as failed; just record it
+            logger.exception(f"Background ingestion failed for paper {paper_id}")
 
 @router.post("/projects/{project_id}/papers/upload", response_model=List[PaperResponse])
 async def upload_papers(
@@ -33,10 +38,7 @@ async def upload_papers(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Verify project
-    p_res = await db.execute(select(Project).where(Project.id == project_id, Project.user_id == current_user.id))
-    if not p_res.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
+    await get_owned_project(db, project_id, current_user)
 
     created_papers = []
 
@@ -80,9 +82,7 @@ async def import_paper_by_identifier(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    p_res = await db.execute(select(Project).where(Project.id == project_id, Project.user_id == current_user.id))
-    if not p_res.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
+    await get_owned_project(db, project_id, current_user)
 
     metadata, pdf_bytes = await doi_arxiv_service.resolve_identifier(payload.identifier)
     if not metadata:
@@ -122,10 +122,7 @@ async def import_paper_by_identifier(
 
 @router.get("/papers/{paper_id}", response_model=PaperDetailResponse)
 async def get_paper_details(paper_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    res = await db.execute(select(Paper).where(Paper.id == paper_id))
-    paper = res.scalar_one_or_none()
-    if not paper:
-        raise HTTPException(status_code=404, detail="Paper not found")
+    paper = await get_owned_resource(db, Paper, paper_id, current_user, "Paper")
 
     sec_res = await db.execute(select(PaperSection).where(PaperSection.paper_id == paper_id).order_by(PaperSection.section_index.asc()))
     sections = sec_res.scalars().all()
@@ -145,29 +142,27 @@ async def get_paper_details(paper_id: UUID, db: AsyncSession = Depends(get_db), 
         parsing_status=paper.parsing_status,
         created_at=paper.created_at,
         sections=[SectionResponse.model_validate(s) for s in sections],
-        metadata=paper.metadata or {}
+        metadata=paper.paper_metadata or {}
     )
 
 @router.get("/papers/{paper_id}/pdf")
-async def get_paper_pdf(paper_id: UUID, db: AsyncSession = Depends(get_db)):
-    res = await db.execute(select(Paper).where(Paper.id == paper_id))
-    paper = res.scalar_one_or_none()
-    if not paper:
-        raise HTTPException(status_code=404, detail="Paper not found")
+async def get_paper_pdf(paper_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    paper = await get_owned_resource(db, Paper, paper_id, current_user, "Paper")
 
-    data = storage_service.download_file(paper.s3_key)
+    try:
+        data = storage_service.download_file(paper.s3_key)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="PDF file not found in storage")
     return StreamingResponse(
         io.BytesIO(data),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{paper.title}.pdf"'}
+        # RFC 5987 encoding so titles with quotes or non-ASCII characters don't break the header
+        headers={"Content-Disposition": f"inline; filename*=UTF-8''{quote(paper.title + '.pdf')}"}
     )
 
 @router.delete("/papers/{paper_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_paper(paper_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    res = await db.execute(select(Paper).where(Paper.id == paper_id))
-    paper = res.scalar_one_or_none()
-    if not paper:
-        raise HTTPException(status_code=404, detail="Paper not found")
+    paper = await get_owned_resource(db, Paper, paper_id, current_user, "Paper")
 
     storage_service.delete_file(paper.s3_key)
     await db.delete(paper)

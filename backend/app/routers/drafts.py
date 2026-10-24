@@ -9,12 +9,13 @@ from app.models.user import User
 from app.models.project import Project
 from app.models.draft import Draft
 from app.schemas.draft import DraftCreate, DraftUpdate, DraftResponse
-from app.services.auth_service import get_current_user
+from app.services.auth_service import get_current_user, get_owned_project, get_owned_resource
 
 router = APIRouter(tags=["Drafts"])
 
 @router.get("/projects/{project_id}/drafts", response_model=List[DraftResponse])
 async def list_drafts(project_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    await get_owned_project(db, project_id, current_user)
     res = await db.execute(select(Draft).where(Draft.project_id == project_id).order_by(Draft.updated_at.desc()))
     return [DraftResponse.model_validate(d) for d in res.scalars().all()]
 
@@ -25,9 +26,7 @@ async def create_draft(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    p_res = await db.execute(select(Project).where(Project.id == project_id, Project.user_id == current_user.id))
-    if not p_res.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
+    await get_owned_project(db, project_id, current_user)
 
     # Detect content type from title extension if not explicitly specified
     content_type = payload.content_type
@@ -51,19 +50,13 @@ async def create_draft(
     return DraftResponse.model_validate(draft)
 
 @router.get("/drafts/{draft_id}", response_model=DraftResponse)
-async def get_draft(draft_id: UUID, db: AsyncSession = Depends(get_db)):
-    res = await db.execute(select(Draft).where(Draft.id == draft_id))
-    draft = res.scalar_one_or_none()
-    if not draft:
-        raise HTTPException(status_code=404, detail="Draft not found")
+async def get_draft(draft_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    draft = await get_owned_resource(db, Draft, draft_id, current_user, "Draft")
     return DraftResponse.model_validate(draft)
 
 @router.put("/drafts/{draft_id}", response_model=DraftResponse)
-async def update_draft(draft_id: UUID, payload: DraftUpdate, db: AsyncSession = Depends(get_db)):
-    res = await db.execute(select(Draft).where(Draft.id == draft_id))
-    draft = res.scalar_one_or_none()
-    if not draft:
-        raise HTTPException(status_code=404, detail="Draft not found")
+async def update_draft(draft_id: UUID, payload: DraftUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    draft = await get_owned_resource(db, Draft, draft_id, current_user, "Draft")
 
     if payload.title is not None:
         draft.title = payload.title
@@ -79,10 +72,7 @@ async def update_draft(draft_id: UUID, payload: DraftUpdate, db: AsyncSession = 
 
 @router.delete("/drafts/{draft_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_draft(draft_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    res = await db.execute(select(Draft).where(Draft.id == draft_id))
-    draft = res.scalar_one_or_none()
-    if not draft:
-        raise HTTPException(status_code=404, detail="Draft not found")
+    draft = await get_owned_resource(db, Draft, draft_id, current_user, "Draft")
 
     await db.delete(draft)
     await db.commit()

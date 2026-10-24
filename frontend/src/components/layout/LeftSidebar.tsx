@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { useParams } from "next/navigation";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { api } from "@/lib/api";
 import { FileTreeItem } from "@/lib/types";
@@ -18,7 +19,11 @@ import {
 } from "lucide-react";
 
 export function LeftSidebar() {
-  const activeProjectId = useWorkspaceStore((s) => s.activeProjectId);
+  // The URL is the source of truth for the open project; the store can briefly
+  // hold the previous project's id while navigating
+  const params = useParams();
+  const storeProjectId = useWorkspaceStore((s) => s.activeProjectId);
+  const activeProjectId = (params?.projectId as string | undefined) ?? storeProjectId;
   const sidebarCollapsed = useWorkspaceStore((s) => s.sidebarCollapsed);
   const setSidebarCollapsed = useWorkspaceStore((s) => s.setSidebarCollapsed);
   const setUploadModalOpen = useWorkspaceStore((s) => s.setUploadModalOpen);
@@ -27,20 +32,27 @@ export function LeftSidebar() {
   const [tree, setTree] = useState<FileTreeItem[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // Bumped on every fetch so only the newest response is applied; responses can
+  // arrive out of order while navigating between projects
+  const requestSeq = useRef(0);
+
   const fetchTree = async () => {
     if (!activeProjectId) return;
+    const seq = ++requestSeq.current;
     setLoading(true);
     try {
       const res = await api.getProjectTree(activeProjectId);
+      if (seq !== requestSeq.current) return;
       setTree(res.tree);
     } catch (e) {
       console.error(e);
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
   };
 
   useEffect(() => {
+    setTree([]);
     fetchTree();
   }, [activeProjectId]);
 

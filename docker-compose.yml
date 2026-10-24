@@ -63,6 +63,9 @@ services:
       - "3000:3000"
     environment:
       - BACKEND_INTERNAL_URL=http://backend:8000
+      # Docker on Windows/macOS does not forward file change events into bind mounts;
+      # poll so `next dev` picks up edits
+      - WATCHPACK_POLLING=true
     depends_on:
       - backend
     volumes:

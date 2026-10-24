@@ -48,13 +48,13 @@ class VectorSearchService:
                 c.section_title,
                 c.page_number,
                 c.chunk_text,
-                (1 - (c.embedding <=> :vector_str::vector)) as similarity
+                (1 - (c.embedding <=> CAST(:vector_str AS vector))) as similarity
             FROM paper_chunks c
             JOIN papers p ON p.id = c.paper_id
             WHERE c.project_id = :project_id
             {paper_filter_sql}
             AND c.embedding IS NOT NULL
-            ORDER BY c.embedding <=> :vector_str::vector ASC
+            ORDER BY c.embedding <=> CAST(:vector_str AS vector) ASC
             LIMIT :top_k
         """
 
@@ -80,15 +80,18 @@ class VectorSearchService:
         vector_results = []
         fts_results = []
 
+        # Each query runs in a savepoint so a failure doesn't abort the caller's transaction
         try:
-            v_res = await db.execute(text(vector_sql), params)
-            vector_results = v_res.mappings().all()
+            async with db.begin_nested():
+                v_res = await db.execute(text(vector_sql), params)
+                vector_results = v_res.mappings().all()
         except Exception as e:
             logger.warning(f"Vector search failed (pgvector might be warming up or empty): {e}")
 
         try:
-            f_res = await db.execute(text(fts_sql), params)
-            fts_results = f_res.mappings().all()
+            async with db.begin_nested():
+                f_res = await db.execute(text(fts_sql), params)
+                fts_results = f_res.mappings().all()
         except Exception as e:
             logger.warning(f"FTS search failed: {e}")
 

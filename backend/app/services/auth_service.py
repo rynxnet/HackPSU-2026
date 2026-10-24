@@ -7,6 +7,7 @@ from typing import Optional
 
 from app.database import get_db
 from app.models.user import User
+from app.models.project import Project
 from app.utils.security import decode_access_token
 from app.config import settings
 
@@ -24,7 +25,7 @@ async def get_current_user_optional(
 
     if not extracted_token:
         # For development / single-user ease, fallback to demo/admin user
-        result = await db.execute(select(User).limit(1))
+        result = await db.execute(select(User).order_by(User.created_at.asc()).limit(1))
         demo_user = result.scalar_one_or_none()
         if not demo_user:
             demo_user = User(
@@ -56,3 +57,22 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     return current_user
+
+async def get_owned_project(db: AsyncSession, project_id: UUID, user: User) -> Project:
+    res = await db.execute(select(Project).where(Project.id == project_id, Project.user_id == user.id))
+    project = res.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+async def get_owned_resource(db: AsyncSession, model, resource_id: UUID, user: User, label: str):
+    """Fetches a project-scoped row (Paper, Dataset, Draft, ChatSession) only if the user owns its project."""
+    res = await db.execute(
+        select(model)
+        .join(Project, Project.id == model.project_id)
+        .where(model.id == resource_id, Project.user_id == user.id)
+    )
+    obj = res.scalar_one_or_none()
+    if not obj:
+        raise HTTPException(status_code=404, detail=f"{label} not found")
+    return obj

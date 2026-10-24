@@ -9,7 +9,7 @@ from app.models.user import User
 from app.models.project import Project
 from app.models.dataset import Dataset
 from app.schemas.dataset import DatasetResponse, DatasetPreviewResponse
-from app.services.auth_service import get_current_user
+from app.services.auth_service import get_current_user, get_owned_project, get_owned_resource
 from app.services.storage_service import storage_service
 from app.services.dataset_service import dataset_service
 
@@ -22,9 +22,7 @@ async def upload_dataset(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    p_res = await db.execute(select(Project).where(Project.id == project_id, Project.user_id == current_user.id))
-    if not p_res.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
+    await get_owned_project(db, project_id, current_user)
 
     file_bytes = await file.read()
     dataset_id = uuid4()
@@ -60,10 +58,7 @@ async def upload_dataset(
 
 @router.get("/datasets/{dataset_id}", response_model=DatasetResponse)
 async def get_dataset(dataset_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    res = await db.execute(select(Dataset).where(Dataset.id == dataset_id))
-    ds = res.scalar_one_or_none()
-    if not ds:
-        raise HTTPException(status_code=404, detail="Dataset not found")
+    ds = await get_owned_resource(db, Dataset, dataset_id, current_user, "Dataset")
     return DatasetResponse.model_validate(ds)
 
 @router.get("/datasets/{dataset_id}/preview", response_model=DatasetPreviewResponse)
@@ -71,12 +66,10 @@ async def get_dataset_preview(
     dataset_id: UUID,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    res = await db.execute(select(Dataset).where(Dataset.id == dataset_id))
-    ds = res.scalar_one_or_none()
-    if not ds:
-        raise HTTPException(status_code=404, detail="Dataset not found")
+    ds = await get_owned_resource(db, Dataset, dataset_id, current_user, "Dataset")
 
     preview = dataset_service.get_preview(
         s3_key=ds.s3_key,
@@ -97,10 +90,7 @@ async def get_dataset_preview(
 
 @router.delete("/datasets/{dataset_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_dataset(dataset_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    res = await db.execute(select(Dataset).where(Dataset.id == dataset_id))
-    ds = res.scalar_one_or_none()
-    if not ds:
-        raise HTTPException(status_code=404, detail="Dataset not found")
+    ds = await get_owned_resource(db, Dataset, dataset_id, current_user, "Dataset")
 
     storage_service.delete_file(ds.s3_key)
     await db.delete(ds)

@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { useParams } from "next/navigation";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { api } from "@/lib/api";
 import { ChatSession, ChatMessage } from "@/lib/types";
@@ -17,7 +18,11 @@ import {
 import { Button } from "@/components/ui/button";
 
 export function ChatPanel() {
-  const activeProjectId = useWorkspaceStore((s) => s.activeProjectId);
+  // The URL is the source of truth for the open project; the store can briefly
+  // hold the previous project's id while navigating
+  const params = useParams();
+  const storeProjectId = useWorkspaceStore((s) => s.activeProjectId);
+  const activeProjectId = (params?.projectId as string | undefined) ?? storeProjectId;
   const chatCollapsed = useWorkspaceStore((s) => s.chatCollapsed);
   const setChatCollapsed = useWorkspaceStore((s) => s.setChatCollapsed);
 
@@ -27,15 +32,27 @@ export function ChatPanel() {
   const [loading, setLoading] = useState(false);
   const [streamingToken, setStreamingToken] = useState("");
 
+  // Only the newest load may update state; responses can arrive out of order
+  // while navigating between projects
+  const loadSeq = useRef(0);
+
   const loadSessions = async () => {
     if (!activeProjectId) return;
+    const seq = ++loadSeq.current;
+    const isStale = () => seq !== loadSeq.current;
     try {
       const data = await api.getChatSessions(activeProjectId);
+      if (isStale()) return;
       setSessions(data);
       if (data.length > 0) {
         const full = await api.getSessionDetails(data[0].id);
+        if (isStale()) return;
         setCurrentSession(full);
         setMessages(full.messages || []);
+      } else {
+        // New project with no chats yet: don't keep showing the previous project's conversation
+        setCurrentSession(null);
+        setMessages([]);
       }
     } catch (e) {
       console.error(e);

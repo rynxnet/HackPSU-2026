@@ -22,11 +22,14 @@ import {
   Layers,
   Sparkles,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 
 export function TopBar() {
   const router = useRouter();
-  const activeProjectId = useWorkspaceStore((s) => s.activeProjectId);
+  // The URL is the source of truth for the open project (see LeftSidebar)
+  const params = useParams();
+  const storeProjectId = useWorkspaceStore((s) => s.activeProjectId);
+  const activeProjectId = (params?.projectId as string | undefined) ?? storeProjectId;
   const setSearchModalOpen = useWorkspaceStore((s) => s.setSearchModalOpen);
   const setNewProjectModalOpen = useWorkspaceStore((s) => s.setNewProjectModalOpen);
   const toggleSplitView = useWorkspaceStore((s) => s.toggleSplitView);

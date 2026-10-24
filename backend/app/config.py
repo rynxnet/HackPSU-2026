@@ -29,8 +29,8 @@ class Settings(BaseSettings):
 
     # Gemini
     GEMINI_API_KEY: Optional[str] = None
-    GEMINI_CHAT_MODEL: str = "gemini-2.0-flash"
-    GEMINI_EMBEDDING_MODEL: str = "text-embedding-004"
+    GEMINI_CHAT_MODEL: str = "gemini-flash-latest"
+    GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-001"
 
     # Security & Auth
     SECRET_KEY: str = "super-secret-jwt-and-session-encryption-key-change-in-production-32bytes"

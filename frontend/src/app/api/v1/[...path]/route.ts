@@ -34,7 +34,11 @@ async function proxy(request: NextRequest, { params }: { params: { path: string[
 
     const responseHeaders = new Headers();
     backendRes.headers.forEach((value, key) => {
-      responseHeaders.set(key, value);
+      // fetch() already decoded the body, so these would no longer match it
+      const k = key.toLowerCase();
+      if (k !== "content-encoding" && k !== "content-length") {
+        responseHeaders.set(key, value);
+      }
     });
 
     return new NextResponse(backendRes.body, {

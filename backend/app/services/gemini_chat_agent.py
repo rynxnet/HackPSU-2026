@@ -33,7 +33,7 @@ class GeminiChatAgent:
     def __init__(self):
         if settings.GEMINI_API_KEY:
             genai.configure(api_key=settings.GEMINI_API_KEY)
-        self.model_name = settings.GEMINI_CHAT_MODEL or "gemini-2.0-flash"
+        self.model_name = settings.GEMINI_CHAT_MODEL or "gemini-flash-latest"
 
     async def run_chat_turn(
         self,
@@ -89,6 +89,9 @@ class GeminiChatAgent:
 
 PROJECT CONTEXT EXCERPTS:
 {grounded_context_str if grounded_context_str else "[No documents found matching this query in the project]"}
+
+PRIOR CONVERSATION:
+{self._format_history(history)}
 
 USER QUESTION:
 {new_user_message}
@@ -160,6 +163,9 @@ USER QUESTION:
 PROJECT CONTEXT EXCERPTS:
 {grounded_context_str if grounded_context_str else "[No documents found matching this query in the project]"}
 
+PRIOR CONVERSATION:
+{self._format_history(history)}
+
 USER QUESTION:
 {new_user_message}
 """
@@ -185,9 +191,19 @@ USER QUESTION:
 
         except Exception as e:
             logger.error(f"Streaming error with Gemini: {e}")
-            yield f"data: {json.dumps({'type': 'token', 'text': f'\\n\\n[Error: {str(e)}]' })}\n\n"
+            error_text = f"\n\n[Error: {e}]"
+            yield f"data: {json.dumps({'type': 'token', 'text': error_text})}\n\n"
             yield f"data: {json.dumps({'type': 'citations', 'citations': citations})}\n\n"
             yield "data: [DONE]\n\n"
+
+    def _format_history(self, history: List[Dict[str, Any]], max_messages: int = 10) -> str:
+        if not history:
+            return "[No prior messages]"
+        lines = []
+        for msg in history[-max_messages:]:
+            speaker = "User" if msg.get("role") == "user" else "Assistant"
+            lines.append(f"{speaker}: {msg.get('content', '')}")
+        return "\n".join(lines)
 
     def _build_offline_response(self, query: str, citations: List[Dict[str, Any]]) -> Dict[str, Any]:
         if not citations:

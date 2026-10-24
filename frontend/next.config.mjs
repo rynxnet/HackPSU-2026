@@ -7,15 +7,9 @@ const nextConfig = {
     config.resolve.alias.encoding = false;
     return config;
   },
-  async rewrites() {
-    const backendUrl = process.env.BACKEND_INTERNAL_URL || "http://backend:8000";
-    return [
-      {
-        source: "/api/v1/:path*",
-        destination: `${backendUrl}/api/v1/:path*`,
-      },
-    ];
-  },
+  // /api/v1/* is proxied to the backend by src/app/api/v1/[...path]/route.ts.
+  // Don't add a rewrite for it: rewrites take precedence over that route and
+  // time out after 30s, which cuts off slow Gemini chat responses.
 };
 
 export default nextConfig;

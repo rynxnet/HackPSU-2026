@@ -10,7 +10,7 @@ from app.models.paper import Paper
 from app.models.dataset import Dataset
 from app.models.draft import Draft
 from app.schemas.search import SearchResultItem, SearchResultResponse
-from app.services.auth_service import get_current_user
+from app.services.auth_service import get_current_user, get_owned_project
 from app.services.vector_search import vector_search_service
 
 router = APIRouter(tags=["Search"])
@@ -19,11 +19,12 @@ router = APIRouter(tags=["Search"])
 async def global_project_search(
     project_id: UUID,
     q: str = Query(..., min_length=1),
-    search_type: str = Query("hybrid", regex="^(hybrid|semantic|keyword)$"),
+    search_type: str = Query("hybrid", pattern="^(hybrid|semantic|keyword)$"),
     limit: int = Query(15, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    await get_owned_project(db, project_id, current_user)
     results: List[SearchResultItem] = []
 
     # 1. Search Drafts (Keyword)
@@ -52,7 +53,7 @@ async def global_project_search(
         ).limit(5)
     )
     for ds in ds_res.scalars().all():
-        cols = [c["name"] for c in ds.column_info[:5]]
+        cols = [c["name"] for c in (ds.column_info or [])[:5]]
         results.append(SearchResultItem(
             id=ds.id,
             resource_type="dataset",

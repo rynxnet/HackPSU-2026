@@ -63,7 +63,7 @@ class PaperIngestionService:
             if parsed_data.get("page_count"):
                 paper.page_count = parsed_data["page_count"]
 
-            paper.metadata = {
+            paper.paper_metadata = {
                 "references": parsed_data.get("references", []),
                 "extracted_fields": list(parsed_data.keys())
             }
@@ -137,7 +137,7 @@ class PaperIngestionService:
         except Exception as e:
             logger.error(f"Paper ingestion failed for {paper_id}: {e}", exc_info=True)
             paper.parsing_status = "failed"
-            paper.metadata = {"error": str(e)}
+            paper.paper_metadata = {"error": str(e)}
             await db.commit()
             raise
 

@@ -46,14 +46,15 @@ export function FileTree({ tree, onRefresh }: FileTreeProps) {
   };
 
   const getStatusIcon = (status?: string) => {
+    // Lucide icons don't accept a title prop, so the tooltip goes on a wrapper
     if (status === "completed") {
-      return <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" title="Parsed & Vectorized" />;
+      return <span title="Parsed & Vectorized"><CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" /></span>;
     }
     if (status === "processing" || status === "pending") {
-      return <Clock className="w-2.5 h-2.5 text-amber-400 animate-spin" title="Extracting sections & embedding" />;
+      return <span title="Extracting sections & embedding"><Clock className="w-2.5 h-2.5 text-amber-400 animate-spin" /></span>;
     }
     if (status === "failed") {
-      return <AlertCircle className="w-2.5 h-2.5 text-rose-400" title="Parsing error" />;
+      return <span title="Parsing error"><AlertCircle className="w-2.5 h-2.5 text-rose-400" /></span>;
     }
     return null;
   };
