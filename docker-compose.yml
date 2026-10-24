@@ -1,0 +1,149 @@
+version: '3.8'
+
+services:
+  # -------------------------------------------------------------
+  # Postgres with pgvector extension (vectors, metadata, chunks)
+  # -------------------------------------------------------------
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: researchide-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-researchide}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/scripts/init_db.sql:/docker-entrypoint-initdb.d/init_db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d researchide"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - researchide-network
+
+  # -------------------------------------------------------------
+  # MinIO (S3-compatible Object Storage for PDFs, Data, Snapshots)
+  # -------------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    container_name: researchide-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - researchide-network
+
+  # Bucket Auto-provisioning helper for MinIO
+  createbuckets:
+    image: minio/mc:latest
+    container_name: researchide-minio-provisioner
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set local http://minio:9000 $${MINIO_ROOT_USER:-minioadmin} $${MINIO_ROOT_PASSWORD:-minioadmin};
+      /usr/bin/mc mb --ignore-existing local/researchide;
+      /usr/bin/mc anonymous set download local/researchide;
+      exit 0;
+      "
+    networks:
+      - researchide-network
+
+  # -------------------------------------------------------------
+  # GROBID Academic Paper TEI-XML Extraction Service
+  # -------------------------------------------------------------
+  grobid:
+    image: grobid/grobid:0.8.0
+    container_name: researchide-grobid
+    restart: unless-stopped
+    ports:
+      - "8070:8070"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8070/api/isalive || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - researchide-network
+
+  # -------------------------------------------------------------
+  # Backend API (FastAPI + Gemini RAG + Chunking + S3 + Vector Search)
+  # -------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: researchide-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-researchide}
+      - SYNC_DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-researchide}
+      - S3_ENDPOINT_URL=http://minio:9000
+      - S3_PUBLIC_URL=http://localhost:9000
+      - S3_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - S3_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - S3_BUCKET_NAME=researchide
+      - GROBID_URL=http://grobid:8070
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    networks:
+      - researchide-network
+
+  # -------------------------------------------------------------
+  # Frontend Client (Next.js 14 App Router + Monaco + PDF.js + Tailwind)
+  # -------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: researchide-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_S3_URL=http://localhost:9000/researchide
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    networks:
+      - researchide-network
+
+networks:
+  researchide-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  minio_data:
