@@ -1,9 +1,18 @@
 import { Project, Paper, Dataset, Draft, ChatSession, ChatMessage, SearchResultItem, FileTreeItem } from "./types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+function getApiBase(): string {
+  // If in browser and running on remote host (like cloudshell or codespaces), use relative path to utilize Next.js rewrites
+  if (typeof window !== "undefined") {
+    if (window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+      return "";
+    }
+  }
+  return process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+}
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const url = `${API_BASE}/api/v1${endpoint}`;
+  const base = getApiBase();
+  const url = `${base}/api/v1${endpoint}`;
   const headers = {
     "Content-Type": "application/json",
     ...(options.headers || {}),
@@ -54,7 +63,8 @@ export const api = {
     const formData = new FormData();
     files.forEach((f) => formData.append("files", f));
 
-    const response = await fetch(`${API_BASE}/api/v1/projects/${projectId}/papers/upload`, {
+    const base = getApiBase();
+    const response = await fetch(`${base}/api/v1/projects/${projectId}/papers/upload`, {
       method: "POST",
       body: formData,
       credentials: "include",
@@ -72,7 +82,8 @@ export const api = {
     return request<Paper>(`/papers/${paperId}`);
   },
   getPaperPdfUrl(paperId: string): string {
-    return `${API_BASE}/api/v1/papers/${paperId}/pdf`;
+    const base = getApiBase();
+    return `${base}/api/v1/papers/${paperId}/pdf`;
   },
 
   // Datasets
@@ -80,7 +91,8 @@ export const api = {
     const formData = new FormData();
     formData.append("file", file);
 
-    const response = await fetch(`${API_BASE}/api/v1/projects/${projectId}/datasets/upload`, {
+    const base = getApiBase();
+    const response = await fetch(`${base}/api/v1/projects/${projectId}/datasets/upload`, {
       method: "POST",
       body: formData,
       credentials: "include",
