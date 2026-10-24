@@ -9,14 +9,40 @@ import "katex/dist/katex.min.css";
 
 import { ChatMessage } from "@/lib/types";
 import { CitationBadge } from "./CitationBadge";
-import { Sparkles, User, Terminal, CheckCircle2 } from "lucide-react";
+import { useWorkspaceStore } from "@/store/workspaceStore";
+import { answerSnippet } from "@/lib/citations";
+import { Sparkles, User, Terminal, CheckCircle2, FileInput } from "lucide-react";
+
+function InsertAnswerButton({ message }: { message: ChatMessage }) {
+  const bibliography = useWorkspaceStore((s) => s.bibliography);
+  const insertIntoDraft = useWorkspaceStore((s) => s.insertIntoDraft);
+  const draftTarget = useWorkspaceStore((s) => s.draftTarget);
+
+  return (
+    <button
+      onClick={() => insertIntoDraft(answerSnippet(message.content, message.citations || [], bibliography), "Answer")}
+      className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors"
+      title={draftTarget ? `Insert at the cursor in ${draftTarget.title}, with citations converted to citation keys` : "Open a draft to insert this answer"}
+    >
+      <FileInput className="w-3 h-3" />
+      <span>Insert into {draftTarget ? draftTarget.title : "draft"}</span>
+    </button>
+  );
+}
 
 interface ChatMessageListProps {
   messages: ChatMessage[];
   streamingToken?: string;
+  isThinking?: boolean;
 }
 
-export function ChatMessageList({ messages, streamingToken }: ChatMessageListProps) {
+export function ChatMessageList({ messages, streamingToken, isThinking }: ChatMessageListProps) {
+  // Keep the newest message in view as answers stream in
+  const endRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    endRef.current?.scrollIntoView({ block: "end" });
+  }, [messages.length, streamingToken, isThinking]);
+
   return (
     <div className="flex-1 p-3 space-y-4 overflow-y-auto text-xs leading-relaxed">
       {messages.length === 0 && !streamingToken && (
@@ -50,7 +76,7 @@ export function ChatMessageList({ messages, streamingToken }: ChatMessageListPro
             }`}
           >
             {/* Message Body */}
-            <div className="prose prose-invert prose-xs max-w-none text-xs break-words">
+            <div className="prose prose-invert prose-xs max-w-none text-xs break-words select-text">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm, remarkMath]}
                 rehypePlugins={[rehypeKatex]}
@@ -66,6 +92,10 @@ export function ChatMessageList({ messages, streamingToken }: ChatMessageListPro
                 {msg.content}
               </ReactMarkdown>
             </div>
+
+            {msg.role === "assistant" && !msg.content.startsWith("⚠️") && (
+              <InsertAnswerButton message={msg} />
+            )}
 
             {/* Citations Footer Shelf */}
             {msg.citations && msg.citations.length > 0 && (
@@ -91,6 +121,22 @@ export function ChatMessageList({ messages, streamingToken }: ChatMessageListPro
         </div>
       ))}
 
+      {isThinking && !streamingToken && (
+        <div className="flex gap-2.5 justify-start">
+          <div className="w-5 h-5 rounded bg-primary/20 text-primary flex items-center justify-center shrink-0 mt-0.5">
+            <Sparkles className="w-3 h-3 animate-pulse" />
+          </div>
+          <div className="rounded-lg px-2.5 py-2 bg-[#18181b] border border-border/80 text-[11px] text-muted-foreground flex items-center gap-1.5">
+            <span className="flex gap-0.5">
+              <span className="w-1 h-1 rounded-full bg-primary animate-bounce [animation-delay:-0.3s]" />
+              <span className="w-1 h-1 rounded-full bg-primary animate-bounce [animation-delay:-0.15s]" />
+              <span className="w-1 h-1 rounded-full bg-primary animate-bounce" />
+            </span>
+            Searching your library...
+          </div>
+        </div>
+      )}
+
       {/* Streaming assistant token bubble */}
       {streamingToken && (
         <div className="flex gap-2.5 justify-start">
@@ -106,6 +152,7 @@ export function ChatMessageList({ messages, streamingToken }: ChatMessageListPro
           </div>
         </div>
       )}
+      <div ref={endRef} />
     </div>
   );
 }

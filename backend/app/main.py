@@ -12,6 +12,8 @@ from app.routers import (
     drafts_router,
     chat_router,
     search_router,
+    writing_router,
+    figures_router,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -56,6 +58,8 @@ app.include_router(datasets_router, prefix=api_v1)
 app.include_router(drafts_router, prefix=api_v1)
 app.include_router(chat_router, prefix=api_v1)
 app.include_router(search_router, prefix=api_v1)
+app.include_router(writing_router, prefix=api_v1)
+app.include_router(figures_router, prefix=api_v1)
 
 @app.get("/health")
 @app.get(f"{api_v1}/health")

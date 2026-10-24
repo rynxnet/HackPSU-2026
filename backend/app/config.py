@@ -29,7 +29,10 @@ class Settings(BaseSettings):
 
     # Gemini
     GEMINI_API_KEY: Optional[str] = None
-    GEMINI_CHAT_MODEL: str = "gemini-flash-latest"
+    GEMINI_CHAT_MODEL: str = "gemini-3.5-flash"
+    # Tried in order when the primary model is out of quota (free-tier quotas are per model)
+    GEMINI_FALLBACK_MODELS: str = "gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-flash-lite-latest,gemini-flash-latest"
+    GEMINI_TIMEOUT_SECONDS: int = 45
     GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-001"
 
     # Security & Auth

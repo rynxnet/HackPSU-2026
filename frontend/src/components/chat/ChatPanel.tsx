@@ -89,12 +89,30 @@ export function ChatPanel() {
     };
     setMessages((prev) => [...prev, tempUserMsg]);
     setLoading(true);
+    setStreamingToken("");
 
     try {
-      // Send message to backend
-      const res = await api.sendChatMessage(activeProjectId, content, currentSession?.id);
-      setMessages((prev) => [...prev, res]);
+      // Stream the answer so it appears as Gemini writes it
+      const projectId = activeProjectId;
+      const res = await api.streamChatMessage(projectId, content, currentSession?.id, (soFar) => setStreamingToken(soFar));
+      const assistantMsg: ChatMessage = {
+        id: `local-${Date.now()}`,
+        session_id: res.sessionId || currentSession?.id || "",
+        role: "assistant",
+        content: res.text,
+        citations: res.citations,
+        created_at: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, assistantMsg]);
+      setStreamingToken("");
+      // Adopt the saved session so follow-up questions keep their context
+      if (res.sessionId && res.sessionId !== currentSession?.id) {
+        api.getSessionDetails(res.sessionId).then((s) => {
+          if (useWorkspaceStore.getState().activeProjectId === projectId) setCurrentSession(s);
+        }).catch(() => {});
+      }
     } catch (err: any) {
+      setStreamingToken("");
       console.error("Chat error:", err);
       const errorMsg: ChatMessage = {
         id: `err-${Date.now()}`,
@@ -156,7 +174,7 @@ export function ChatPanel() {
       </div>
 
       {/* Messages Scroll Area */}
-      <ChatMessageList messages={messages} streamingToken={streamingToken} />
+      <ChatMessageList messages={messages} streamingToken={streamingToken} isThinking={loading} />
 
       {/* Input */}
       <ChatInput onSendMessage={handleSendMessage} isLoading={loading} />

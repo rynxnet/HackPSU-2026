@@ -10,6 +10,7 @@ from app.models.project import Project
 from app.models.draft import Draft
 from app.schemas.draft import DraftCreate, DraftUpdate, DraftResponse
 from app.services.auth_service import get_current_user, get_owned_project, get_owned_resource
+from app.services.draft_history import maybe_auto_snapshot
 
 router = APIRouter(tags=["Drafts"])
 
@@ -62,9 +63,11 @@ async def update_draft(draft_id: UUID, payload: DraftUpdate, db: AsyncSession = 
         draft.title = payload.title
     if payload.content_type is not None:
         draft.content_type = payload.content_type
-    if payload.content is not None:
+    if payload.content is not None and payload.content != draft.content:
+        previous_content = draft.content
         draft.content = payload.content
         draft.version += 1
+        await maybe_auto_snapshot(db, draft, previous_content)
 
     await db.commit()
     await db.refresh(draft)

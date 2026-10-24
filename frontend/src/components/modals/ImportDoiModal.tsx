@@ -18,6 +18,8 @@ export function ImportDoiModal() {
   const importDoiModalOpen = useWorkspaceStore((s) => s.importDoiModalOpen);
   const setImportDoiModalOpen = useWorkspaceStore((s) => s.setImportDoiModalOpen);
   const activeProjectId = useWorkspaceStore((s) => s.activeProjectId);
+  const refreshTree = useWorkspaceStore((s) => s.refreshTree);
+  const pushToast = useWorkspaceStore((s) => s.pushToast);
 
   const [identifier, setIdentifier] = useState("");
   const [loading, setLoading] = useState(false);
@@ -27,12 +29,14 @@ export function ImportDoiModal() {
     setLoading(true);
 
     try {
-      await api.importDoiOrArxiv(activeProjectId, identifier.trim());
+      const paper = await api.importDoiOrArxiv(activeProjectId, identifier.trim());
       setImportDoiModalOpen(false);
       setIdentifier("");
-      window.location.reload();
+      // Refresh the explorer in place so open tabs and drafts are kept
+      refreshTree();
+      pushToast(`Imported "${paper.title}". It's ready to cite.`, "success");
     } catch (err: any) {
-      alert(`Import failed: ${err.message || "Could not resolve identifier"}`);
+      pushToast(`Import failed: ${err.message || "Could not resolve identifier"}`, "error");
     } finally {
       setLoading(false);
     }

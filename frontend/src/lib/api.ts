@@ -1,4 +1,7 @@
-import { Project, Paper, Dataset, Draft, ChatSession, ChatMessage, SearchResultItem, FileTreeItem } from "./types";
+import {
+  Project, Paper, Dataset, Draft, ChatSession, ChatMessage, SearchResultItem, FileTreeItem,
+  BibEntry, ExportTemplate, DraftVersion, ReviewComment, Figure, FigureSpec,
+} from "./types";
 
 // Always use relative path so Next.js rewrites proxy requests to backend inside docker
 const API_BASE = "";
@@ -89,6 +92,9 @@ export const api = {
     if (!response.ok) throw new Error("Failed to upload dataset");
     return response.json();
   },
+  async getDataset(datasetId: string): Promise<Dataset> {
+    return request<Dataset>(`/datasets/${datasetId}`);
+  },
   async getDatasetPreview(datasetId: string, page = 1, pageSize = 50) {
     return request<{ columns: string[]; rows: any[]; total_rows: number; page: number; page_size: number }>(
       `/datasets/${datasetId}/preview?page=${page}&page_size=${pageSize}`
@@ -134,8 +140,167 @@ export const api = {
     });
   },
 
+  /**
+   * Streams a grounded answer token by token (Server-Sent Events).
+   * Resolves with the full text, citations and the session the reply was saved to.
+   */
+  async streamChatMessage(
+    projectId: string,
+    content: string,
+    sessionId: string | undefined,
+    onToken: (textSoFar: string) => void
+  ): Promise<{ text: string; citations: ChatMessage["citations"]; sessionId?: string }> {
+    const response = await fetch(`/api/v1/projects/${projectId}/chat/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, session_id: sessionId }),
+      credentials: "include",
+    });
+    if (!response.ok || !response.body) throw new Error(await errorDetail(response, "Failed to contact the research agent"));
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let text = "";
+    let citations: ChatMessage["citations"] = [];
+    let savedSession: string | undefined;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop() || "";
+      for (const evt of events) {
+        const data = evt.replace(/^data: /, "").trim();
+        if (!data || data === "[DONE]") continue;
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.type === "token") {
+            text += parsed.text;
+            onToken(text);
+          } else if (parsed.type === "citations") {
+            citations = parsed.citations || [];
+          } else if (parsed.type === "session") {
+            savedSession = parsed.session_id;
+          }
+        } catch {
+          // ignore partial / malformed events
+        }
+      }
+    }
+    return { text, citations, sessionId: savedSession };
+  },
+
   // Global Search
   async searchProject(projectId: string, query: string): Promise<{ query: string; results: SearchResultItem[] }> {
     return request(`/projects/${projectId}/search?q=${encodeURIComponent(query)}`);
   },
+
+  // Bibliography & export
+  async getBibliography(projectId: string): Promise<BibEntry[]> {
+    const res = await request<{ entries: BibEntry[] }>(`/projects/${projectId}/bibliography`);
+    return res.entries;
+  },
+  async downloadBibtex(projectId: string): Promise<void> {
+    await downloadFile(`/projects/${projectId}/bibliography.bib`);
+  },
+  async getExportTemplates(): Promise<ExportTemplate[]> {
+    return request<ExportTemplate[]>("/export/templates");
+  },
+  async exportDraft(draftId: string, template: string): Promise<void> {
+    await downloadFile(`/drafts/${draftId}/export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ template }),
+    });
+  },
+
+  // Draft version history
+  async getDraftVersions(draftId: string): Promise<DraftVersion[]> {
+    return request<DraftVersion[]>(`/drafts/${draftId}/versions`);
+  },
+  async saveDraftVersion(draftId: string, label?: string): Promise<DraftVersion> {
+    return request<DraftVersion>(`/drafts/${draftId}/versions`, { method: "POST", body: JSON.stringify({ label }) });
+  },
+  async getDraftVersion(versionId: string): Promise<DraftVersion> {
+    return request<DraftVersion>(`/draft-versions/${versionId}`);
+  },
+  async restoreDraftVersion(versionId: string): Promise<Draft> {
+    return request<Draft>(`/draft-versions/${versionId}/restore`, { method: "POST" });
+  },
+
+  // Peer review
+  async getReviewComments(draftId: string): Promise<ReviewComment[]> {
+    return request<ReviewComment[]>(`/drafts/${draftId}/comments`);
+  },
+  async addReviewComment(draftId: string, comment: { body: string; reviewer?: string; anchor_text?: string }): Promise<ReviewComment> {
+    return request<ReviewComment>(`/drafts/${draftId}/comments`, { method: "POST", body: JSON.stringify(comment) });
+  },
+  async importReviewComments(draftId: string, text: string, reviewer?: string): Promise<ReviewComment[]> {
+    return request<ReviewComment[]>(`/drafts/${draftId}/comments/import`, { method: "POST", body: JSON.stringify({ text, reviewer }) });
+  },
+  async updateReviewComment(commentId: string, updates: Partial<Pick<ReviewComment, "body" | "reviewer" | "anchor_text" | "status" | "response">>): Promise<ReviewComment> {
+    return request<ReviewComment>(`/review-comments/${commentId}`, { method: "PATCH", body: JSON.stringify(updates) });
+  },
+  async deleteReviewComment(commentId: string): Promise<void> {
+    await request(`/review-comments/${commentId}`, { method: "DELETE" });
+  },
+  async suggestReviewResponse(commentId: string): Promise<string> {
+    const res = await request<{ suggestion: string }>(`/review-comments/${commentId}/suggest`, { method: "POST" });
+    return res.suggestion;
+  },
+  async downloadResponseLetter(draftId: string): Promise<void> {
+    await downloadFile(`/drafts/${draftId}/response-letter`);
+  },
+
+  // Figures
+  async getFigures(projectId: string): Promise<Figure[]> {
+    return request<Figure[]>(`/projects/${projectId}/figures`);
+  },
+  async getFigure(figureId: string): Promise<Figure> {
+    return request<Figure>(`/figures/${figureId}`);
+  },
+  async createFigure(datasetId: string, spec: FigureSpec & { caption?: string }): Promise<Figure> {
+    return request<Figure>(`/datasets/${datasetId}/figures`, { method: "POST", body: JSON.stringify(spec) });
+  },
+  async updateFigure(figureId: string, updates: Partial<FigureSpec> & { caption?: string }): Promise<Figure> {
+    return request<Figure>(`/figures/${figureId}`, { method: "PATCH", body: JSON.stringify(updates) });
+  },
+  async deleteFigure(figureId: string): Promise<void> {
+    await request(`/figures/${figureId}`, { method: "DELETE" });
+  },
+  async replaceDatasetFile(datasetId: string, file: File): Promise<{ row_count?: number; figures_updated: number; figure_errors: string[] }> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await fetch(`/api/v1/datasets/${datasetId}/replace`, { method: "POST", body: formData, credentials: "include" });
+    if (!response.ok) throw new Error(await errorDetail(response, "Failed to replace dataset"));
+    return response.json();
+  },
 };
+
+async function errorDetail(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = await response.json();
+    return body.detail || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/** Fetches a file endpoint and saves it using the filename the server sends. */
+async function downloadFile(endpoint: string, options: RequestInit = {}): Promise<void> {
+  const response = await fetch(`/api/v1${endpoint}`, { ...options, credentials: "include" });
+  if (!response.ok) throw new Error(await errorDetail(response, "Download failed"));
+  const disposition = response.headers.get("content-disposition") || "";
+  const match = disposition.match(/filename\*=UTF-8''([^;]+)/i) || disposition.match(/filename="?([^";]+)"?/i);
+  const filename = match ? decodeURIComponent(match[1]) : "download";
+  const url = URL.createObjectURL(await response.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

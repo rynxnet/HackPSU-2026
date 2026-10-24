@@ -1,4 +1,4 @@
-export type ResourceType = "paper" | "dataset" | "draft" | "folder";
+export type ResourceType = "paper" | "dataset" | "draft" | "figure" | "folder";
 
 export interface Project {
   id: string;
@@ -62,11 +62,85 @@ export interface Draft {
   updated_at: string;
 }
 
+export interface BibEntry {
+  paper_id: string;
+  key: string;
+  title: string;
+  authors: string[];
+  year?: number;
+  doi?: string;
+  arxiv_id?: string;
+  short: string; // in-text form, e.g. "Vaswani et al., 2017"
+  formatted: string; // reference list entry
+  bibtex: string;
+}
+
+export interface FigureSpec {
+  chart: "line" | "bar" | "scatter" | "histogram";
+  x: string;
+  y: string[];
+  title?: string;
+  xlabel?: string;
+  ylabel?: string;
+}
+
+export interface Figure {
+  id: string;
+  project_id: string;
+  dataset_id?: string;
+  dataset_name?: string;
+  label: string;
+  caption: string;
+  spec: FigureSpec;
+  version: number;
+  render_error?: string;
+  image_url: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DraftVersion {
+  id: string;
+  draft_id: string;
+  version: number;
+  label?: string;
+  word_count: number;
+  created_at: string;
+  content?: string;
+}
+
+export type ReviewStatus = "open" | "addressed" | "declined";
+
+export interface ReviewComment {
+  id: string;
+  draft_id: string;
+  reviewer: string;
+  body: string;
+  anchor_text?: string;
+  status: ReviewStatus;
+  response: string;
+  position: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExportTemplate {
+  id: string;
+  name: string;
+  description: string;
+}
+
+/** Text to insert into a draft, in both supported source formats. */
+export interface DraftSnippet {
+  markdown: string;
+  latex: string;
+}
+
 export interface TabItem {
   id: string; // unique tab instance ID
   resourceId: string;
   title: string;
-  type: "paper" | "dataset" | "draft";
+  type: "paper" | "dataset" | "draft" | "figure";
   pane: "left" | "right"; // for split view support
   metadata?: {
     page?: number;
@@ -116,7 +190,7 @@ export interface SearchResultItem {
 export interface FileTreeItem {
   id: string;
   name: string;
-  type: "folder" | "paper" | "dataset" | "draft";
+  type: "folder" | "paper" | "dataset" | "draft" | "figure";
   path: string;
   displayName?: string;
   status?: string;

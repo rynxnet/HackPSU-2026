@@ -1,10 +1,14 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { Paper } from "@/lib/types";
+import { useWorkspaceStore } from "@/store/workspaceStore";
+import { findEntry, citeSnippet, quoteSnippet } from "@/lib/citations";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
+  Quote,
+  TextCursorInput,
   FileText,
   Bookmark,
   ExternalLink,
@@ -42,6 +46,56 @@ export function PDFViewerPane({ paperId, initialPage = 1, initialSectionTitle }:
   }, [paperId, initialSectionTitle]);
 
   const pdfUrl = api.getPaperPdfUrl(paperId);
+
+  const bibliography = useWorkspaceStore((s) => s.bibliography);
+  const insertIntoDraft = useWorkspaceStore((s) => s.insertIntoDraft);
+  const pushToast = useWorkspaceStore((s) => s.pushToast);
+  const [selection, setSelection] = useState<{ text: string; page?: number; x: number; y: number } | null>(null);
+  const readerRef = useRef<HTMLDivElement>(null);
+
+  // Clear the floating "quote" button whenever the selection collapses
+  useEffect(() => {
+    const onChange = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed) setSelection(null);
+    };
+    document.addEventListener("selectionchange", onChange);
+    return () => document.removeEventListener("selectionchange", onChange);
+  }, []);
+
+  const handleSelection = (e: React.MouseEvent, page?: number) => {
+    const sel = window.getSelection();
+    const text = sel?.toString().trim() || "";
+    if (!sel || !text || sel.rangeCount === 0 || !readerRef.current) {
+      setSelection(null);
+      return;
+    }
+    const rect = sel.getRangeAt(0).getBoundingClientRect();
+    const host = readerRef.current.getBoundingClientRect();
+    setSelection({
+      text,
+      page,
+      x: rect.left - host.left + rect.width / 2 + readerRef.current.scrollLeft,
+      y: rect.top - host.top + readerRef.current.scrollTop,
+    });
+  };
+
+  const insertSelection = (asQuote: boolean) => {
+    if (!selection || !paper) return;
+    const entry = findEntry(bibliography, { paper_id: paper.id, paper_title: paper.title });
+    if (!entry) {
+      pushToast("This paper isn't in the bibliography yet. Try again in a moment.", "error");
+      return;
+    }
+    const inserted = insertIntoDraft(
+      asQuote ? quoteSnippet(entry, selection.text, selection.page) : citeSnippet(entry, selection.page),
+      asQuote ? "Quote" : "Citation"
+    );
+    if (inserted) {
+      window.getSelection()?.removeAllRanges();
+      setSelection(null);
+    }
+  };
 
   if (!paper) {
     return (
@@ -83,6 +137,19 @@ export function PDFViewerPane({ paperId, initialPage = 1, initialSectionTitle }:
               Extracted Sections ({paper.sections?.length || 0})
             </button>
           </div>
+
+          <button
+            onClick={() => {
+              const entry = findEntry(bibliography, { paper_id: paper.id, paper_title: paper.title });
+              if (entry) insertIntoDraft(citeSnippet(entry), "Citation");
+              else pushToast("This paper isn't in the bibliography yet.", "error");
+            }}
+            className="flex items-center gap-1 px-2 py-0.5 rounded border border-border text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted"
+            title="Insert a citation to this paper at the cursor in your draft"
+          >
+            <TextCursorInput className="w-3 h-3" />
+            Cite
+          </button>
 
           <a
             href={pdfUrl}
@@ -142,16 +209,46 @@ export function PDFViewerPane({ paperId, initialPage = 1, initialSectionTitle }:
             </div>
 
             {/* Section Reader Content */}
-            <div className="flex-1 bg-background p-6 overflow-y-auto">
+            <div ref={readerRef} className="flex-1 bg-background p-6 overflow-y-auto relative">
+              {selection && (
+                <div
+                  className="absolute z-20 -translate-x-1/2 -translate-y-full flex items-center gap-0.5 rounded-md border border-border bg-[#202024] shadow-lg p-0.5 text-[11px]"
+                  style={{ left: selection.x, top: selection.y - 6 }}
+                  onMouseDown={(e) => e.preventDefault()} // keep the text selected while clicking
+                >
+                  <button
+                    onClick={() => insertSelection(true)}
+                    className="flex items-center gap-1 px-2 py-1 rounded hover:bg-primary/20 text-foreground"
+                  >
+                    <Quote className="w-3 h-3 text-primary" />
+                    Quote in draft
+                  </button>
+                  <button
+                    onClick={() => insertSelection(false)}
+                    className="flex items-center gap-1 px-2 py-1 rounded hover:bg-primary/20 text-muted-foreground"
+                  >
+                    <TextCursorInput className="w-3 h-3" />
+                    Cite only
+                  </button>
+                </div>
+              )}
               {paper.sections?.find((s) => s.section_title === selectedSection) ? (
                 (() => {
                   const sec = paper.sections.find((s) => s.section_title === selectedSection)!;
                   return (
                     <div className="max-w-3xl mx-auto space-y-4">
-                      <h2 className="text-xl font-bold tracking-tight text-white border-b border-border pb-2">
-                        {sec.section_title}
-                      </h2>
-                      <div className="text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap font-sans">
+                      <div className="flex items-center justify-between border-b border-border pb-2 gap-3">
+                        <h2 className="text-xl font-bold tracking-tight text-white">
+                          {sec.section_title}
+                        </h2>
+                        <span className="text-[11px] text-muted-foreground shrink-0">
+                          Select text to quote it in your draft
+                        </span>
+                      </div>
+                      <div
+                        onMouseUp={(e) => handleSelection(e, sec.start_page)}
+                        className="text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap font-sans select-text selection:bg-primary/40 selection:text-white"
+                      >
                         {sec.content}
                       </div>
                     </div>

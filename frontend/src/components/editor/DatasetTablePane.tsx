@@ -1,10 +1,13 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { Dataset } from "@/lib/types";
 import { formatBytes } from "@/lib/utils";
+import { useWorkspaceStore } from "@/store/workspaceStore";
+import { FigureBuilderModal } from "@/components/modals/FigureBuilderModal";
 import {
+  RefreshCw,
   Database,
   Table as TableIcon,
   ChevronLeft,
@@ -32,6 +35,17 @@ export function DatasetTablePane({ datasetId }: DatasetTablePaneProps) {
   const [sortCol, setSortCol] = useState<string | null>(null);
   const [sortAsc, setSortAsc] = useState(true);
 
+  const [reloadKey, setReloadKey] = useState(0);
+  const [builderOpen, setBuilderOpen] = useState(false);
+  const [replacing, setReplacing] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const pushToast = useWorkspaceStore((s) => s.pushToast);
+  const refreshTree = useWorkspaceStore((s) => s.refreshTree);
+
+  useEffect(() => {
+    api.getDataset(datasetId).then(setDataset).catch(() => {});
+  }, [datasetId, reloadKey]);
+
   useEffect(() => {
     api.getDatasetPreview(datasetId, page, pageSize)
       .then((data) => {
@@ -41,7 +55,28 @@ export function DatasetTablePane({ datasetId }: DatasetTablePaneProps) {
       })
       .catch((err) => console.error("Error fetching dataset preview:", err))
       .finally(() => setLoading(false));
-  }, [datasetId, page, pageSize]);
+  }, [datasetId, page, pageSize, reloadKey]);
+
+  const replaceFile = async (file: File) => {
+    setReplacing(true);
+    try {
+      const res = await api.replaceDatasetFile(datasetId, file);
+      setPage(1);
+      setReloadKey((k) => k + 1);
+      refreshTree();
+      const figs = res.figures_updated === 1 ? "1 linked figure" : `${res.figures_updated} linked figures`;
+      pushToast(
+        res.figure_errors.length
+          ? `Data updated, but ${res.figure_errors.length} figure(s) could not re-render: ${res.figure_errors[0]}`
+          : `Data updated (${res.row_count} rows). ${figs} re-rendered.`,
+        res.figure_errors.length ? "error" : "success"
+      );
+    } catch (e: any) {
+      pushToast(e.message, "error");
+    } finally {
+      setReplacing(false);
+    }
+  };
 
   // Client-side filtering across current page
   const filteredRows = rows.filter((r) => {
@@ -97,6 +132,37 @@ export function DatasetTablePane({ datasetId }: DatasetTablePaneProps) {
         </div>
 
         <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={() => setBuilderOpen(true)}
+            disabled={!dataset}
+            className="h-6 gap-1 text-[11px]"
+            title="Make a publication figure from this data"
+          >
+            <BarChart2 className="w-3 h-3" /> Create figure
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={replacing}
+            className="h-6 gap-1 text-[11px]"
+            title="Upload a new version of this file; figures made from it re-render automatically"
+          >
+            {replacing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} Replace data
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,.tsv,.parquet"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (f) replaceFile(f);
+            }}
+          />
+
           {/* Quick Row Search */}
           <div className="relative w-44">
             <Search className="w-3 h-3 absolute left-2 top-2 text-muted-foreground" />
@@ -180,6 +246,8 @@ export function DatasetTablePane({ datasetId }: DatasetTablePaneProps) {
           </tbody>
         </table>
       </div>
+
+      {dataset && <FigureBuilderModal open={builderOpen} onOpenChange={setBuilderOpen} dataset={dataset} />}
     </div>
   );
 }

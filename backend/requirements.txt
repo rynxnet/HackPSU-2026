@@ -30,6 +30,7 @@ pypdf>=4.2.0
 pandas>=2.2.2
 pyarrow>=16.1.0
 fastparquet>=2024.5.0
+matplotlib>=3.8.0
 
 # Security & Auth
 python-jose[cryptography]>=3.3.0

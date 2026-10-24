@@ -18,6 +18,8 @@ export function UploadModal() {
   const uploadModalOpen = useWorkspaceStore((s) => s.uploadModalOpen);
   const setUploadModalOpen = useWorkspaceStore((s) => s.setUploadModalOpen);
   const activeProjectId = useWorkspaceStore((s) => s.activeProjectId);
+  const refreshTree = useWorkspaceStore((s) => s.refreshTree);
+  const pushToast = useWorkspaceStore((s) => s.pushToast);
 
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -58,10 +60,16 @@ export function UploadModal() {
 
       setUploadModalOpen(false);
       setFiles([]);
-      // Refresh page or trigger tree refresh
-      window.location.reload();
+      // Refresh the explorer in place so open tabs and drafts are kept
+      refreshTree();
+      pushToast(
+        pdfs.length > 0
+          ? `Uploaded ${files.length} file(s). Papers are being parsed and indexed; they become citable in a few seconds.`
+          : `Uploaded ${files.length} file(s).`,
+        "success"
+      );
     } catch (err: any) {
-      alert(`Upload error: ${err.message || "Failed to upload"}`);
+      pushToast(`Upload error: ${err.message || "Failed to upload"}`, "error");
     } finally {
       setUploading(false);
       setUploadProgress(null);

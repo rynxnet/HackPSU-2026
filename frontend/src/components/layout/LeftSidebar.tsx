@@ -56,6 +56,23 @@ export function LeftSidebar() {
     fetchTree();
   }, [activeProjectId]);
 
+  // Other panels (figure builder, uploads) bump treeVersion after changing project files
+  const treeVersion = useWorkspaceStore((s) => s.treeVersion);
+  const refreshTree = useWorkspaceStore((s) => s.refreshTree);
+  useEffect(() => {
+    if (treeVersion > 0) fetchTree();
+  }, [treeVersion]);
+
+  // While papers are still being parsed, poll so status icons and the bibliography update on their own
+  const parsing = tree.some((folder) =>
+    (folder.children || []).some((c) => c.type === "paper" && (c.status === "pending" || c.status === "processing"))
+  );
+  useEffect(() => {
+    if (!parsing) return;
+    const timer = setTimeout(refreshTree, 3000);
+    return () => clearTimeout(timer);
+  }, [parsing, tree, refreshTree]);
+
   // Listen for custom draft creation events from file tree
   useEffect(() => {
     const handleCreateDraft = async (e: any) => {

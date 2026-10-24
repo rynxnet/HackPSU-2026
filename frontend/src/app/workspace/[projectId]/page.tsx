@@ -12,11 +12,14 @@ import { GlobalSearchModal } from "@/components/modals/GlobalSearchModal";
 import { UploadModal } from "@/components/modals/UploadModal";
 import { ImportDoiModal } from "@/components/modals/ImportDoiModal";
 import { NewProjectModal } from "@/components/modals/NewProjectModal";
+import { Toaster } from "@/components/ui/toaster";
 
 export default function WorkspacePage() {
   const params = useParams();
   const projectId = params?.projectId as string;
   const setActiveProject = useWorkspaceStore((s) => s.setActiveProject);
+  const loadBibliography = useWorkspaceStore((s) => s.loadBibliography);
+  const treeVersion = useWorkspaceStore((s) => s.treeVersion);
 
   // Initialize keyboard shortcuts (Cmd+P, Cmd+K, Cmd+\, Cmd+B)
   useKeyboardShortcuts();
@@ -26,6 +29,11 @@ export default function WorkspacePage() {
       setActiveProject(projectId);
     }
   }, [projectId, setActiveProject]);
+
+  // Citation keys are needed by chat, the paper reader and the editor; refresh when files change
+  useEffect(() => {
+    if (projectId) loadBibliography(projectId, true).catch(() => {});
+  }, [projectId, treeVersion, loadBibliography]);
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-background">
@@ -49,6 +57,7 @@ export default function WorkspacePage() {
       <UploadModal />
       <ImportDoiModal />
       <NewProjectModal />
+      <Toaster />
     </div>
   );
 }

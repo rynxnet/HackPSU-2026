@@ -1,5 +1,27 @@
 import { create } from "zustand";
-import { TabItem, CitationItem } from "../lib/types";
+import { TabItem, CitationItem, BibEntry, DraftSnippet } from "../lib/types";
+import { api } from "../lib/api";
+
+export interface Toast {
+  id: number;
+  message: string;
+  kind: "success" | "error" | "info";
+}
+
+/**
+ * The draft that receives "insert into draft" actions (the most recently focused one).
+ * While its editor is open, `insert` edits it at the cursor. After the tab is closed or hidden,
+ * the target is kept "detached": inserts go through the API at the last cursor offset.
+ */
+export interface DraftTarget {
+  draftId: string;
+  title: string;
+  contentType: "markdown" | "latex" | string;
+  insert?: (text: string) => void;
+  cursorOffset?: number;
+  /** Resolves once the editor's last autosave has finished (detached targets only). */
+  ready?: Promise<void>;
+}
 
 interface WorkspaceState {
   activeProjectId: string | null;
@@ -31,7 +53,26 @@ interface WorkspaceState {
   setSidebarCollapsed: (collapsed: boolean | ((prev: boolean) => boolean)) => void;
   triggerChatFocus: () => void;
   jumpToCitation: (citation: CitationItem) => void;
+
+  // Cross-tool glue: inserting citations, quotes, answers and figures into the open draft
+  draftTarget: DraftTarget | null;
+  setDraftTarget: (target: DraftTarget | null) => void;
+  detachDraftTarget: (draftId: string, cursorOffset: number | undefined, ready: Promise<void>) => void;
+  insertIntoDraft: (snippet: DraftSnippet, what?: string) => boolean;
+
+  bibliography: BibEntry[];
+  bibliographyProjectId: string | null;
+  loadBibliography: (projectId: string, force?: boolean) => Promise<BibEntry[]>;
+
+  treeVersion: number; // bumped when files change so the explorer refetches
+  refreshTree: () => void;
+
+  toasts: Toast[];
+  pushToast: (message: string, kind?: Toast["kind"]) => void;
+  dismissToast: (id: number) => void;
 }
+
+let toastSeq = 0;
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   activeProjectId: null,
@@ -49,7 +90,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   chatFocusTrigger: 0,
 
   setActiveProject: (projectId: string) => {
-    set({ activeProjectId: projectId, tabs: [], activeTabId: null, splitActiveTabId: null });
+    if (get().activeProjectId === projectId) return;
+    set({ activeProjectId: projectId, tabs: [], activeTabId: null, splitActiveTabId: null, draftTarget: null });
   },
 
   openTab: (tabData, openInSplit = false) => {
@@ -163,4 +205,70 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       },
     });
   },
+
+  draftTarget: null,
+  setDraftTarget: (target) => set({ draftTarget: target }),
+  detachDraftTarget: (draftId, cursorOffset, ready) => {
+    const target = get().draftTarget;
+    if (target?.draftId === draftId) {
+      set({ draftTarget: { draftId, title: target.title, contentType: target.contentType, cursorOffset, ready } });
+    }
+  },
+  insertIntoDraft: (snippet, what = "Text") => {
+    const target = get().draftTarget;
+    if (!target) {
+      get().pushToast("Open a draft first, then try again. It will be inserted at your cursor.", "info");
+      return false;
+    }
+    const text = target.contentType === "latex" ? snippet.latex : snippet.markdown;
+    if (target.insert) {
+      target.insert(text);
+      get().pushToast(`${what} inserted into ${target.title}`, "success");
+      return true;
+    }
+
+    // Editor isn't open: insert server-side at the last cursor position, then advance the cursor
+    (async () => {
+      try {
+        await target.ready;
+        const draft = await api.getDraft(target.draftId);
+        const offset = Math.min(target.cursorOffset ?? draft.content.length, draft.content.length);
+        await api.updateDraft(target.draftId, { content: draft.content.slice(0, offset) + text + draft.content.slice(offset) });
+        const current = get().draftTarget;
+        if (current?.draftId === target.draftId && !current.insert) {
+          set({ draftTarget: { ...current, cursorOffset: offset + text.length } });
+        }
+        get().pushToast(`${what} inserted into ${target.title}`, "success");
+      } catch (e: any) {
+        get().pushToast(`Couldn't insert into ${target.title}: ${e.message}`, "error");
+      }
+    })();
+    return true;
+  },
+
+  bibliography: [],
+  bibliographyProjectId: null,
+  loadBibliography: async (projectId, force = false) => {
+    const state = get();
+    if (!force && state.bibliographyProjectId === projectId && state.bibliography.length > 0) {
+      return state.bibliography;
+    }
+    const entries = await api.getBibliography(projectId);
+    // Ignore the response if the user switched projects while it loaded
+    if (get().activeProjectId === projectId || get().activeProjectId === null) {
+      set({ bibliography: entries, bibliographyProjectId: projectId });
+    }
+    return entries;
+  },
+
+  treeVersion: 0,
+  refreshTree: () => set((state) => ({ treeVersion: state.treeVersion + 1 })),
+
+  toasts: [],
+  pushToast: (message, kind = "info") => {
+    const id = ++toastSeq;
+    set((state) => ({ toasts: [...state.toasts.slice(-3), { id, message, kind }] }));
+    setTimeout(() => get().dismissToast(id), kind === "error" ? 6000 : 3500);
+  },
+  dismissToast: (id) => set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) })),
 }));

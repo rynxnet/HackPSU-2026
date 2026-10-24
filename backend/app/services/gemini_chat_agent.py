@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from typing import AsyncGenerator, List, Dict, Any, Optional
@@ -5,6 +6,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import google.generativeai as genai
+from google.api_core import exceptions as gexc
 from google.generativeai.types import content_types
 
 from app.config import settings
@@ -26,14 +28,80 @@ CRITICAL GROUNDING DIRECTIVE:
      `[Paper Title, Section Name, p. X]` or `[Dataset: Dataset Name]`.
    - Never make a claim without attributing it to an exact paper section or dataset column/metric.
 4. When relevant, present mathematical formulas using standard LaTeX format (e.g. `$E = mc^2$` or `$$\\int_0^\\infty ...$$`).
-5. Use the provided tools (search_library, get_paper_section, inspect_dataset, list_project_resources) to retrieve facts before formulating your answer.
+5. The relevant project excerpts are provided below. Answer directly in text; you have no tools to call.
 """
+
+def _response_text(response) -> str:
+    """Joins the text parts of a Gemini response; response.text raises if any part isn't text (e.g. a function call)."""
+    parts = []
+    for candidate in getattr(response, "candidates", None) or []:
+        content = getattr(candidate, "content", None)
+        for part in getattr(content, "parts", None) or []:
+            text = getattr(part, "text", "")
+            if text:
+                parts.append(text)
+        if parts:
+            break
+    return "".join(parts)
+
+class GeminiUnavailableError(Exception):
+    """Raised when every configured chat model is out of quota or unavailable."""
+
 
 class GeminiChatAgent:
     def __init__(self):
         if settings.GEMINI_API_KEY:
             genai.configure(api_key=settings.GEMINI_API_KEY)
-        self.model_name = settings.GEMINI_CHAT_MODEL or "gemini-flash-latest"
+        self.model_name = settings.GEMINI_CHAT_MODEL or "gemini-3.5-flash"
+
+    def _candidate_models(self) -> List[str]:
+        # Free-tier quotas are per model, so when one model is exhausted the next one usually still works
+        fallbacks = [m.strip() for m in (settings.GEMINI_FALLBACK_MODELS or "").split(",") if m.strip()]
+        return list(dict.fromkeys([self.model_name, *fallbacks]))
+
+    async def _start_generation(self, prompt: str, stream: bool):
+        """
+        Starts a generation on the first model that accepts the request.
+        For streaming, returns (model_name, first_chunk, response) so quota errors
+        raised on the first chunk can still fall through to the next model.
+        """
+        errors = []
+        for name in self._candidate_models():
+            model = genai.GenerativeModel(model_name=name)
+            try:
+                # retry=None: the SDK otherwise silently retries 429s for minutes, which looks like a hang
+                response = await asyncio.wait_for(
+                    model.generate_content_async(
+                        prompt,
+                        stream=stream,
+                        request_options={"retry": None, "timeout": settings.GEMINI_TIMEOUT_SECONDS}
+                    ),
+                    timeout=settings.GEMINI_TIMEOUT_SECONDS
+                )
+                if not stream:
+                    return name, None, response
+                iterator = response.__aiter__()
+                first_chunk = await asyncio.wait_for(iterator.__anext__(), timeout=settings.GEMINI_TIMEOUT_SECONDS)
+                return name, first_chunk, iterator
+            except (gexc.ResourceExhausted, gexc.NotFound, gexc.ServiceUnavailable, gexc.DeadlineExceeded, asyncio.TimeoutError) as e:
+                reason = "timed out" if isinstance(e, asyncio.TimeoutError) else type(e).__name__
+                logger.warning(f"Gemini model {name} unavailable ({reason}); trying next model")
+                errors.append(f"{name}: {reason}")
+        raise GeminiUnavailableError("; ".join(errors))
+
+    async def generate_text(self, prompt: str) -> str:
+        """One-off generation (no retrieval) with the same model fallback as chat. Raises GeminiUnavailableError."""
+        if not settings.GEMINI_API_KEY:
+            raise GeminiUnavailableError("GEMINI_API_KEY is not set")
+        _, _, response = await self._start_generation(prompt, stream=False)
+        return _response_text(response).strip()
+
+    def _unavailable_message(self, err: Exception) -> str:
+        return (
+            "⚠️ Gemini didn't respond: every configured model is out of quota or unavailable "
+            f"({err}). Free-tier keys allow about 20 requests per model per day; "
+            "try again later or use a key with billing enabled."
+        )
 
     async def run_chat_turn(
         self,
@@ -103,9 +171,9 @@ USER QUESTION:
             return self._build_offline_response(new_user_message, citations_found)
 
         try:
-            model = genai.GenerativeModel(model_name=self.model_name)
-            response = await model.generate_content_async(prompt_with_context)
-            content = response.text
+            model_used, _, response = await self._start_generation(prompt_with_context, stream=False)
+            content = _response_text(response) or "⚠️ Gemini returned an empty response. Please try rephrasing your question."
+            logger.info(f"Chat answered by {model_used}")
 
             return {
                 "role": "assistant",
@@ -113,11 +181,19 @@ USER QUESTION:
                 "citations": citations_found,
                 "tool_calls": []
             }
+        except GeminiUnavailableError as e:
+            logger.error(f"Gemini chat unavailable: {e}")
+            return {
+                "role": "assistant",
+                "content": self._unavailable_message(e),
+                "citations": [],
+                "tool_calls": []
+            }
         except Exception as e:
             logger.error(f"Gemini chat API error: {e}")
             return {
                 "role": "assistant",
-                "content": f"⚠️ Gemini API Error: {str(e)}. (Ensure GEMINI_API_KEY is configured in your .env file).",
+                "content": f"⚠️ Gemini API Error: {e}",
                 "citations": citations_found,
                 "tool_calls": []
             }
@@ -178,15 +254,25 @@ USER QUESTION:
             return
 
         try:
-            model = genai.GenerativeModel(model_name=self.model_name)
-            response = await model.generate_content_async(prompt_with_context, stream=True)
+            model_used, first_chunk, chunks = await self._start_generation(prompt_with_context, stream=True)
+            logger.info(f"Chat stream answered by {model_used}")
 
-            async for chunk in response:
-                if chunk.text:
-                    yield f"data: {json.dumps({'type': 'token', 'text': chunk.text})}\n\n"
+            first_text = _response_text(first_chunk)
+            if first_text:
+                yield f"data: {json.dumps({'type': 'token', 'text': first_text})}\n\n"
+            async for chunk in chunks:
+                chunk_text = _response_text(chunk)
+                if chunk_text:
+                    yield f"data: {json.dumps({'type': 'token', 'text': chunk_text})}\n\n"
 
             # Send citations event
             yield f"data: {json.dumps({'type': 'citations', 'citations': citations})}\n\n"
+            yield "data: [DONE]\n\n"
+
+        except GeminiUnavailableError as e:
+            logger.error(f"Gemini chat unavailable: {e}")
+            yield f"data: {json.dumps({'type': 'token', 'text': self._unavailable_message(e)})}\n\n"
+            yield f"data: {json.dumps({'type': 'citations', 'citations': []})}\n\n"
             yield "data: [DONE]\n\n"
 
         except Exception as e:

@@ -158,16 +158,18 @@ async def stream_chat_endpoint(
                         tokens.append(event["text"])
                     elif event.get("type") == "citations":
                         citations = event["citations"]
+                elif chunk.startswith("data: [DONE]"):
+                    # Save before signalling completion so a client refetch sees the reply
+                    stream_db.add(ChatMessage(
+                        session_id=session_id,
+                        role="assistant",
+                        content="".join(tokens),
+                        citations=citations,
+                        tool_calls=[]
+                    ))
+                    await stream_db.commit()
+                    yield f"data: {json.dumps({'type': 'session', 'session_id': str(session_id)})}\n\n"
                 yield chunk
-
-            stream_db.add(ChatMessage(
-                session_id=session_id,
-                role="assistant",
-                content="".join(tokens),
-                citations=citations,
-                tool_calls=[]
-            ))
-            await stream_db.commit()
 
     return StreamingResponse(
         event_generator(),

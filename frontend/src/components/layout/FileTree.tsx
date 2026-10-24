@@ -18,6 +18,7 @@ import {
   CheckCircle2,
   Clock,
   AlertCircle,
+  BarChart2,
 } from "lucide-react";
 
 interface FileTreeProps {
@@ -189,11 +190,15 @@ export function FileTree({ tree, onRefresh }: FileTreeProps) {
                           {item.type === "draft" && (
                             <FileCode className="w-3.5 h-3.5 shrink-0 text-indigo-400/90" />
                           )}
+                          {item.type === "figure" && (
+                            <BarChart2 className="w-3.5 h-3.5 shrink-0 text-emerald-400/90" />
+                          )}
                           <span className="truncate text-xs">{item.displayName || item.name}</span>
                         </div>
 
                         <div className="flex items-center gap-1 shrink-0 ml-1">
                           {item.type === "paper" && getStatusIcon(item.status)}
+                          {item.type === "figure" && item.status === "failed" && getStatusIcon("failed")}
                           {item.type === "dataset" && item.rowCount !== undefined && (
                             <span className="text-[9px] text-muted-foreground/60 font-mono">
                               {item.rowCount}r
@@ -205,7 +210,7 @@ export function FileTree({ tree, onRefresh }: FileTreeProps) {
                   })
                 ) : (
                   <div className="px-2 py-1.5 text-[11px] text-muted-foreground/40 italic">
-                    Empty folder
+                    {folder.name === "figures" ? "Open a dataset and click Create figure" : "Empty folder"}
                   </div>
                 )}
               </div>

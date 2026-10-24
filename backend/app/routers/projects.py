@@ -10,6 +10,7 @@ from app.models.project import Project
 from app.models.paper import Paper
 from app.models.dataset import Dataset
 from app.models.draft import Draft
+from app.models.writing import Figure
 from app.schemas.project import ProjectCreate, ProjectUpdate, ProjectResponse, ProjectTreeResponse
 from app.services.auth_service import get_current_user
 
@@ -116,6 +117,9 @@ async def get_project_file_tree(project_id: UUID, db: AsyncSession = Depends(get
     dr_res = await db.execute(select(Draft).where(Draft.project_id == project_id).order_by(Draft.updated_at.desc()))
     drafts = dr_res.scalars().all()
 
+    fig_res = await db.execute(select(Figure).where(Figure.project_id == project_id).order_by(Figure.created_at.asc()))
+    figures = fig_res.scalars().all()
+
     tree = [
         {
             "id": "folder-library",
@@ -172,6 +176,23 @@ async def get_project_file_tree(project_id: UUID, db: AsyncSession = Depends(get
                     "path": f"/drafts/{dr.id}",
                     "updated_at": dr.updated_at.isoformat() if dr.updated_at else None
                 } for dr in drafts
+            ]
+        },
+        {
+            "id": "folder-figures",
+            "name": "figures",
+            "type": "folder",
+            "path": "/figures",
+            "children": [
+                {
+                    "id": str(f.id),
+                    "name": f"{f.label}.png",
+                    "type": "figure",
+                    "label": f.label,
+                    "path": f"/figures/{f.id}",
+                    "status": "failed" if f.render_error else "completed",
+                    "updated_at": f.updated_at.isoformat() if f.updated_at else None
+                } for f in figures
             ]
         }
     ]

@@ -6,6 +6,7 @@ import { TabBar } from "./TabBar";
 import { MonacoEditorPane } from "./MonacoEditorPane";
 import { PDFViewerPane } from "./PDFViewerPane";
 import { DatasetTablePane } from "./DatasetTablePane";
+import { FigurePane } from "./FigurePane";
 import { Sparkles, Command, FileText, Database, BookOpen } from "lucide-react";
 
 export function EditorWorkspace() {
@@ -34,6 +35,8 @@ export function EditorWorkspace() {
         return <MonacoEditorPane draftId={tab.resourceId} />;
       case "dataset":
         return <DatasetTablePane datasetId={tab.resourceId} />;
+      case "figure":
+        return <FigurePane figureId={tab.resourceId} />;
       default:
         return null;
     }
