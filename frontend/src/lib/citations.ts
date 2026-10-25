@@ -60,18 +60,27 @@ export function figureSnippet(figure: Figure): DraftSnippet {
  * `[Paper Title, Section, p. 3]` become real citations of the matching bibliography entry.
  */
 export function answerSnippet(content: string, citations: CitationItem[], bibliography: BibEntry[]): DraftSnippet {
-  const badge = /`?\[([^\[\]`]+?)(?:,\s*([^\[\],`]+?))?(?:,\s*p\.\s*(\d+))?\]`?/g;
+  // Any bracketed group, optionally wrapped in backticks inside or outside the brackets:
+  // [Title, Section, p. 3]  `[Title, p. 3]`  [`Title, Section, p. 3`]
+  const badge = /`?\[`?([^\[\]`]+?)`?\]`?(?!\()/g;
+  // Longest titles first so "BERT: Pre-training…" wins over a shorter title that is its prefix
+  const known = [
+    ...bibliography.map((e) => ({ title: e.title, entry: e as BibEntry | undefined })),
+    ...citations.map((c) => ({ title: c.paper_title, entry: findEntry(bibliography, c) })),
+  ].filter((k) => k.entry && k.title).sort((a, b) => b.title.length - a.title.length);
 
   const convert = (format: "markdown" | "latex") =>
-    content.replace(badge, (match, title: string, _section: string, page: string) => {
-      if (title.startsWith("@")) return match; // already a citation key
-      const datasetMatch = title.match(/^Dataset:\s*(.+)$/i);
+    content.replace(badge, (match, inner: string) => {
+      const text = inner.trim();
+      if (text.startsWith("@")) return match; // already a citation key
+      const datasetMatch = text.match(/^Dataset:\s*(.+)$/i);
       if (datasetMatch) return format === "latex" ? `(dataset: ${escapeLatex(datasetMatch[1])})` : `(dataset: ${datasetMatch[1]})`;
-      const cited = citations.find((c) => normalize(c.paper_title) === normalize(title)) ||
-        citations.find((c) => normalize(title).startsWith(normalize(c.paper_title)));
-      const entry = findEntry(bibliography, cited ?? { paper_title: title });
-      if (!entry) return match;
-      return citeSnippet(entry, page ? parseInt(page, 10) : undefined)[format];
+      // Match on the paper title rather than splitting on commas, since titles can contain commas
+      const norm = normalize(text);
+      const hit = known.find((k) => norm.startsWith(normalize(k.title)));
+      if (!hit?.entry) return match;
+      const page = text.match(/\bp(?:p|age)?\.?\s*(\d+)\s*$/i);
+      return citeSnippet(hit.entry, page ? parseInt(page[1], 10) : undefined)[format];
     });
 
   return { markdown: `\n${convert("markdown").trim()}\n\n`, latex: `\n${escapeAnswerForLatex(convert("latex")).trim()}\n\n` };

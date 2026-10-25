@@ -1,5 +1,7 @@
+import asyncio
 import uuid
 from typing import Dict, Any, Optional
+from app.database import AsyncSessionLocal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models.paper import Paper, PaperSection, PaperChunk
@@ -131,7 +133,11 @@ class PaperIngestionService:
             paper.parsing_status = "completed"
             await db.commit()
             await db.refresh(paper)
-            logger.info(f"Successfully ingested paper {paper.id} with {len(all_chunks_to_insert)} vector chunks.")
+            missing = sum(1 for e in (embeddings if texts_to_embed else []) if e is None)
+            logger.info(f"Successfully ingested paper {paper.id} with {len(all_chunks_to_insert)} chunks ({missing} awaiting embeddings).")
+            if missing:
+                # Embedding quota is per minute; try again once it has reset
+                asyncio.create_task(self._embed_missing_later(paper.id))
             return paper
 
         except Exception as e:
@@ -140,5 +146,31 @@ class PaperIngestionService:
             paper.paper_metadata = {"error": str(e)}
             await db.commit()
             raise
+
+    async def embed_chunks(self, db: AsyncSession, paper_id: uuid.UUID, only_missing: bool = True) -> Dict[str, int]:
+        """(Re-)embeds a paper's chunks. only_missing=False also replaces existing vectors."""
+        query = select(PaperChunk).where(PaperChunk.paper_id == paper_id).order_by(PaperChunk.chunk_index)
+        if only_missing:
+            query = query.where(PaperChunk.embedding.is_(None))
+        chunks = (await db.execute(query)).scalars().all()
+        if not chunks:
+            return {"chunks": 0, "embedded": 0}
+        embeddings = await embedding_service.get_embeddings_batch([c.chunk_text for c in chunks])
+        embedded = 0
+        for chunk, emb in zip(chunks, embeddings):
+            if emb is not None:
+                chunk.embedding = emb
+                embedded += 1
+        await db.commit()
+        logger.info(f"Embedded {embedded}/{len(chunks)} chunks of paper {paper_id}")
+        return {"chunks": len(chunks), "embedded": embedded}
+
+    async def _embed_missing_later(self, paper_id: uuid.UUID, delay_seconds: int = 90) -> None:
+        await asyncio.sleep(delay_seconds)
+        try:
+            async with AsyncSessionLocal() as db:
+                await self.embed_chunks(db, paper_id, only_missing=True)
+        except Exception as e:
+            logger.warning(f"Deferred embedding for paper {paper_id} failed: {e}")
 
 paper_ingestion_service = PaperIngestionService()

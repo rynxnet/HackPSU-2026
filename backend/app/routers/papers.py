@@ -160,6 +160,12 @@ async def get_paper_pdf(paper_id: UUID, db: AsyncSession = Depends(get_db), curr
         headers={"Content-Disposition": f"inline; filename*=UTF-8''{quote(paper.title + '.pdf')}"}
     )
 
+@router.post("/papers/{paper_id}/reindex")
+async def reindex_paper(paper_id: UUID, all_chunks: bool = False, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Embeds chunks that are missing vectors (or every chunk with all_chunks=true), e.g. after a quota error."""
+    await get_owned_resource(db, Paper, paper_id, current_user, "Paper")
+    return await paper_ingestion_service.embed_chunks(db, paper_id, only_missing=not all_chunks)
+
 @router.delete("/papers/{paper_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_paper(paper_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     paper = await get_owned_resource(db, Paper, paper_id, current_user, "Paper")

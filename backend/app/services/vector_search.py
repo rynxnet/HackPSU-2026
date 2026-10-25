@@ -24,7 +24,8 @@ class VectorSearchService:
     ) -> List[Dict[str, Any]]:
         # 1. Embed query
         query_vector = await embedding_service.get_embedding(query)
-        vector_str = "[" + ",".join(f"{x:.6f}" for x in query_vector) + "]"
+        # No query vector (embedding API unavailable): run keyword search only
+        vector_str = "[" + ",".join(f"{x:.6f}" for x in query_vector) + "]" if query_vector else None
 
         # Base filter
         paper_filter_sql = ""
@@ -59,6 +60,9 @@ class VectorSearchService:
         """
 
         # 3. Full-Text Keyword Search Query
+        # Natural-language questions rarely contain every term of a passage, so match ANY term
+        # (OR instead of plainto_tsquery's AND) and let ts_rank_cd reward passages matching more terms.
+        any_terms = "NULLIF(replace(plainto_tsquery('english', :query)::text, ' & ', ' | '), '')::tsquery"
         fts_sql = f"""
             SELECT 
                 c.id,
@@ -67,12 +71,12 @@ class VectorSearchService:
                 c.section_title,
                 c.page_number,
                 c.chunk_text,
-                ts_rank_cd(to_tsvector('english', c.chunk_text), plainto_tsquery('english', :query)) as rank
+                ts_rank_cd(to_tsvector('english', c.chunk_text), {any_terms}) as rank
             FROM paper_chunks c
             JOIN papers p ON p.id = c.paper_id
             WHERE c.project_id = :project_id
             {paper_filter_sql}
-            AND to_tsvector('english', c.chunk_text) @@ plainto_tsquery('english', :query)
+            AND to_tsvector('english', c.chunk_text) @@ {any_terms}
             ORDER BY rank DESC
             LIMIT :top_k
         """
@@ -82,9 +86,10 @@ class VectorSearchService:
 
         # Each query runs in a savepoint so a failure doesn't abort the caller's transaction
         try:
-            async with db.begin_nested():
-                v_res = await db.execute(text(vector_sql), params)
-                vector_results = v_res.mappings().all()
+            if vector_str:
+                async with db.begin_nested():
+                    v_res = await db.execute(text(vector_sql), params)
+                    vector_results = v_res.mappings().all()
         except Exception as e:
             logger.warning(f"Vector search failed (pgvector might be warming up or empty): {e}")
 
@@ -131,6 +136,28 @@ class VectorSearchService:
 
         # Sort descending by fused score
         sorted_results = sorted(scored_items.values(), key=lambda x: x["score"], reverse=True)
-        return sorted_results[:top_k]
+        return self._diversify(sorted_results, top_k)
+
+    @staticmethod
+    def _diversify(ranked: List[Dict[str, Any]], top_k: int) -> List[Dict[str, Any]]:
+        """
+        Caps how many results one paper can take, so a question spanning several papers
+        gets evidence from each of them instead of the single best-matching paper filling every slot.
+        Leftover slots are refilled in rank order if other papers have nothing relevant.
+        """
+        papers = {r["paper_id"] for r in ranked}
+        if len(papers) < 2:
+            return ranked[:top_k]
+        cap = max(2, -(-top_k // 2)) # ceil(top_k / 2)
+        picked, overflow, per_paper = [], [], {}
+        for r in ranked:
+            n = per_paper.get(r["paper_id"], 0)
+            if n < cap and len(picked) < top_k:
+                picked.append(r)
+                per_paper[r["paper_id"]] = n + 1
+            else:
+                overflow.append(r)
+        picked.extend(overflow[: top_k - len(picked)])
+        return sorted(picked, key=lambda x: x["score"], reverse=True)
 
 vector_search_service = VectorSearchService()

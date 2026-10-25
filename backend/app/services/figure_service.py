@@ -61,7 +61,11 @@ def render_png(df: pd.DataFrame, spec: Dict[str, Any]) -> bytes:
         elif chart == "bar":
             # Average repeated x values so each category gets one bar per series
             grouped = df.groupby(x, sort=False)[ys].mean(numeric_only=True)
-            grouped.plot(kind="bar", ax=ax, rot=0 if len(grouped) <= 8 else 45, legend=len(ys) > 1, width=0.75)
+            grouped.plot(kind="bar", ax=ax, rot=0, legend=len(ys) > 1, width=0.75)
+            # Tilt category labels when they would collide (many bars or long names)
+            label_chars = sum(len(str(v)) for v in grouped.index)
+            if len(grouped) > 8 or label_chars > 55:
+                plt.setp(ax.get_xticklabels(), rotation=30, ha="right", rotation_mode="anchor")
         elif chart == "scatter":
             for y in ys:
                 ax.scatter(df[x], df[y], s=14, alpha=0.8, label=y)
