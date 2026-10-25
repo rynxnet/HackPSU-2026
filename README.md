@@ -1,46 +1,90 @@
 # ResearchIDE 🔬
 
-**An IDE for academic research that connects your papers, data, drafts and reviews in one workspace, so you stop copying things between tools by hand.**
+**An IDE for writing research papers: it finds the problems in your paper before reviewers do.**
 
-Researchers already have good tools for each step: reference managers, notebooks, Overleaf, Word. The time goes into the *glue* between them: copying a quote and its citation into a draft, exporting a plot and re-uploading it after every data change, reformatting a paper for a different journal, and juggling reviewer comments against manuscript versions. ResearchIDE keeps all of it in one project and does the glue for you, with an AI research assistant that answers **only** from your own papers and cites the page it used.
+ResearchIDE checks what you wrote against your sources and your data, the way a code editor underlines bugs: claims your citations don't support, papers cited for something they never said, numbers that disagree with your results spreadsheet, and sentences copied from a source without quotation marks. It also turns a stack of papers into a comparison table with every cell traced to the page it came from, then carries that, along with your citations, figures and reviewer comments, through to a journal-ready LaTeX submission.
+
+> Other tools help you **read** papers. ResearchIDE helps you **write** them, and checks that what you wrote is true.
 
 ---
 
-## Why this exists
+## 🧭 What makes it different
 
-| Pain point | What the research says | What ResearchIDE does |
+Tools like NotebookLM, Elicit and SciSpace are excellent at *answering questions about your sources*. ResearchIDE has that too (grounded chat with page-level citations), but its focus is the part those tools don't cover: **your manuscript**.
+
+| | Chat-over-documents tools | ResearchIDE |
 |---|---|---|
-| **Formatting & resubmission** | A median of 14 hours to format one manuscript, about 52 hours per researcher per year (LeBlanc et al., *PLOS ONE*, 2019). | One-click export to IEEE, ACM, APA or a generic article. |
-| **Lost lineage between data and figures** | Over half of researchers have failed to reproduce *their own* results; untracked scripts, data and figure versions are a leading cause (*Nature* reproducibility survey, 2016). | Figures are generated from datasets and stay linked. Replace the data and every figure re-renders, all the way into the export. |
-| **Reading → writing friction** | Reference managers store metadata well but don't connect a claim in Paper A to your draft without copy-paste (ACM CHI studies of synthesis workflows). | Quote a passage or an AI answer straight into the draft, with a proper citation key and page. |
-| **Tool juggling** | Researchers commonly run 5–8 separate apps for writing, analysis, references, notes and review. | Library, data, drafts, AI chat, version history and peer review live in one project. |
+| Ask questions about your papers | ✅ | ✅ |
+| Check **your draft's claims** against the sources you cited | ❌ | ✅ Citation audit |
+| Catch numbers in the text that **disagree with your data** | ❌ | ✅ Data check |
+| Flag wording **copied from a source** without quotes | ❌ | ✅ Copied-wording check |
+| Turn papers into a **structured, page-traced table** you can chart | Prose summaries | ✅ Literature matrix |
+| Export a formatted, cited **submission** (IEEE / ACM / APA) | ❌ | ✅ |
+| Track **peer review** and draft a response letter | ❌ | ✅ |
 
 ---
 
-## ✨ Features
+## ✨ Headline features
+
+### 🩺 Problems panel: a linter for your paper
+Opening a project lands you in your manuscript, not a chat window. Problems are underlined right in the text, compiler-style, with a hover explanation, and listed in a **Problems** panel under the editor:
+
+> **paper.md:** ❌ 2 errors · ⚠️ 3 warnings · ℹ️ 2 suggestions · 11/14 claims verified
+
+- **Click** a problem to jump to it; **one-click fixes** apply the suggested change ("Use 28.4", "Cite Devlin et al., 2018 instead").
+- The instant checks re-run automatically a moment after each autosave.
+- A toolbar badge shows the paper's health at a glance; chat is a side tool you open when you need it.
+
+### 🔎 Citation audit
+Click **Audit citations** and every claim in the draft is checked against **the paper it cites** and **the rest of your library**. Each claim is classified as:
+
+| Verdict | Meaning | Suggested fix |
+|---|---|---|
+| ✅ Supported | The cited paper says this | None needed |
+| ⚠️ Cited source doesn't say this | The support is in a *different* paper | Swap in the right citation and page |
+| ⚠️ Overstated | The source supports only part of the claim (a number, scope or strength) | Shown with the source passage |
+| ❌ Unsupported | Nothing cited (or in the library) backs it | Add a source or rephrase as your own finding |
+| ℹ️ Needs a citation | A factual claim with no citation, which your library supports | Insert the citation |
+
+The audit sees each claim's supporting passage, and you can open the source at that page. It costs one AI request per run, and results are cached until you re-run it; edited sentences drop out automatically.
+
+### 📊 Data and wording checks (instant, no AI)
+- **Numbers vs. your data:** "transformer-big reaches 28.1 BLEU" is flagged when `results.csv` says 28.4. Each number is paired with the row (model, condition, …) named before it in the sentence, so a sentence comparing two models is checked correctly.
+- **Copied wording:** a sentence that repeats 10+ consecutive words from a paper in your library, without quotation marks, is flagged with the source passage and a one-click citation.
+- **Broken references:** citation keys that don't exist ("did you mean @vaswani2017attention?"), and references to figures that don't exist.
+- **Open reviewer comments** still waiting for a response.
+
+### 🧮 Literature matrix: papers → page-traced data
+Pick the questions (*approach, benchmark, models used, success rate, human in the loop?, key limitation…*, or your own) and ResearchIDE fills a table with **one row per paper**, read from each paper's own text in the background.
+- **Every cell links to its evidence:** click it to see the exact passage and page, and open the paper there.
+- **Correct any cell;** your edits are never overwritten by later fills.
+- Columns can be **text, number or yes/no**, and you can add a column at any time.
+- **Save as dataset** turns the matrix into a CSV in `/data`, ready to chart with the figure builder, so figures in your paper trace back to specific pages of specific papers.
+- **Insert table** adds it to your draft as a cited comparison table (Markdown or LaTeX).
+
+---
+
+## 🛠️ Everything else in the workflow
 
 ### Workspace
-- **VS Code-style layout:** an explorer with `/library` (papers), `/data` (datasets), `/drafts` (Markdown / LaTeX) and `/figures`; tabbed editors with split view; global search (`Ctrl/Cmd+P`).
-- **Paper library:** drag-and-drop PDF upload or import by DOI / arXiv ID. Metadata is fetched automatically, and papers are parsed into sections, chunked and embedded for search. There's an in-browser PDF viewer plus an *Extracted Sections* reader.
-- **Datasets:** CSV, TSV and Parquet with schema detection, summary statistics, and a sortable, filterable, paginated table.
-- **Drafts:** a Monaco editor for Markdown and LaTeX with autosave, word counts and syntax highlighting.
+- **VS Code-style layout:** an explorer with `/library` (papers), `/data` (datasets), `/drafts`, `/figures` and `/matrices`; tabbed editors with split view; global search (`Ctrl/Cmd+P`).
+- **Paper library:** drag-and-drop PDF upload or import by DOI / arXiv ID. Metadata is fetched automatically; papers are parsed into sections, chunked and indexed for hybrid search. There's an in-browser PDF viewer plus an *Extracted Sections* reader.
+- **Datasets:** CSV, TSV and Parquet with schema detection, summary statistics, and a sortable, filterable table.
+- **Drafts:** a Monaco editor for Markdown and LaTeX with autosave and syntax highlighting.
 
-### Grounded AI research chat
-- Answers come **only** from your project's papers and datasets, via hybrid retrieval (pgvector cosine similarity + Postgres full-text search, fused with reciprocal rank fusion). If the library doesn't contain the evidence, it says so.
-- Every claim carries a clickable citation that opens the paper at the right section and page.
-- Answers stream in token by token, and follow-up questions keep the conversation's context.
-- Powered by Google Gemini, with automatic fallback across models when one hits its free-tier quota.
+### Grounded research chat
+- Answers come **only** from your project's papers and datasets, via hybrid retrieval (pgvector similarity + Postgres full-text search, fused with reciprocal rank fusion and diversified across papers). If the library lacks the evidence, it says so.
+- Clickable page-level citations, streaming answers, and conversation memory.
+- Google Gemini with automatic fallback across models when one hits its free-tier quota.
 
-### 1. Reading → Writing: cite without copy-paste
-- **Cite / Quote buttons** on every citation the AI gives you.
-- **Insert into draft** on any AI answer: its inline citations are converted to real citation keys, e.g. `[Attention Is All You Need, Introduction, p. 2]` → `[@vaswani2017attention, p. 2]`.
-- **Quote from the paper reader:** select any passage in *Extracted Sections* and click **Quote in draft**.
-- **Autocomplete:** type `[@` in Markdown or `\cite{` in LaTeX to pick from your library.
-- **Automatic bibliography:** stable, Google-Scholar-style keys (`vaswani2017attention`), BibTeX and APA references generated from paper metadata. Download `references.bib` any time.
-- Inserts go to the most recently used draft at your cursor, even when that tab isn't visible.
+### Reading → Writing
+- **Cite / Quote** buttons on every citation the assistant gives you; **Insert into draft** converts an answer's citations into real keys (`[@vaswani2017attention, p. 2]`).
+- **Quote from the reader:** select a passage in *Extracted Sections*, then **Quote in draft**.
+- **Autocomplete:** type `[@` in Markdown or `\cite{` in LaTeX.
+- **Automatic bibliography:** stable keys (`vaswani2017attention`), BibTeX and APA references from paper metadata.
 
-### 2. Draft → Journal: one-click re-templating
-- **Export** a draft as an Overleaf-ready `.zip` containing `main.tex`, `references.bib` and `figures/`:
+### Draft → Journal
+- **Export** an Overleaf-ready `.zip` (`main.tex`, `references.bib`, `figures/`):
 
   | Template | Class / bibliography style |
   |---|---|
@@ -50,36 +94,34 @@ Researchers already have good tools for each step: reference managers, notebooks
   | APA-style manuscript | `article`, double-spaced 12pt + `apacite` |
   | Markdown + references | `(Author, Year)` citations and a formatted reference list |
 
-- **Markdown drafts** are converted to LaTeX: headings, emphasis, lists, quotes, math, code, links, `[@key, p. N]` → `\cite[p.~N]{key}`, figures → `figure` environments, `@fig:label` → `Figure~\ref{fig:label}`. An *Abstract* section is placed where each template expects it.
-- **LaTeX drafts** are re-templated: the preamble is replaced and your body text is kept.
-- **Live preview:** a side-by-side manuscript view with formatted citations, numbered figures, rendered math and a generated reference list.
-- All four LaTeX templates are verified to compile with `pdflatex` + `bibtex` with no undefined references.
+- Markdown drafts convert to LaTeX (citations, figures, tables, math, cross-references); LaTeX drafts are re-templated, keeping your body text.
+- **Live preview** with formatted citations, numbered figures and a generated reference list.
+- All four LaTeX templates are verified to compile with `pdflatex` + `bibtex`.
 
-### 3. Draft ↔ Peer review
-- **Version history:** checkpoints are saved automatically while you write (at most every 5 minutes), and you can save named versions ("Submitted to ACL"). Compare any version with the current draft side by side; restoring first saves your current text, so it can always be undone.
-- **Review panel:** paste a whole decision letter and it is split into comments by reviewer and numbered point. A passage the reviewer quoted becomes a clickable anchor that jumps to it in your draft. For each comment you can:
-  - track its status: *open*, *addressed* or *declined*;
-  - write a response, or have the AI draft one from your manuscript.
+### Draft ↔ Peer review
+- **Version history** with automatic checkpoints, named versions, side-by-side diffs and safe restore.
+- **Review panel:** paste a decision letter and it is split into comments by reviewer, linked to the passages they quote. Track each comment's status, draft responses with AI, and download a *Response to Reviewers* letter.
 
-  **Download response letter** produces a formatted, point-by-point *Response to Reviewers* document.
-
-### 4. Data → Paper: live, linked figures
-- **Create figure** from any dataset: line, bar, scatter or histogram, rendered as a 300 dpi publication-style PNG.
-- Insert it with one click: `![caption](figure:label)` in Markdown, or a `figure` environment in LaTeX.
-- **Replace data** on a dataset: every figure built from it re-renders automatically, in the preview and in every export.
+### Data → Paper
+- **Create figure** from any dataset (line, bar, scatter, histogram) as a 300 dpi publication PNG.
+- **Replace data** and every figure built from it re-renders, in the preview and in every export.
 
 ---
 
 ## 🎬 Five-minute demo
 
-1. **New project:** use the project switcher (top left) → *Create New Project*.
-2. **Import a paper:** click **Import DOI** and enter `arXiv:1706.03762` (*Attention Is All You Need*).
-3. **Ask the AI:** "What is multi-head attention?" The answer streams in with page-level citations; click one to open the paper there.
-4. **Write:** open `notes.md` and click **Insert into notes.md** under the answer. Type `[@` to autocomplete another citation, then toggle **Preview**.
-5. **Add data:** upload a small CSV, e.g. `model,bleu` with a few rows, open it, click **Create figure**, then **Insert into draft**.
-6. **Change the data:** click **Replace data** with an updated CSV and watch the figure update in the preview.
-7. **Get reviewed:** in the draft, click **Review** → **Paste review**, paste a few numbered comments, and try **Draft a response with AI** and the response-letter download.
-8. **Submit:** click **Export** → *IEEE conference*, and upload the zip to Overleaf (*New Project → Upload Project*).
+1. **Import papers:** click **Import DOI** and add `arXiv:1706.03762` (*Attention Is All You Need*) and `arXiv:1810.04805` (*BERT*).
+2. **Open the manuscript:** the project opens straight into its draft. Paste this paragraph, which has three planted mistakes:
+
+   > BERT pre-trains deep bidirectional representations by jointly conditioning on both left and right context in all layers [@vaswani2017attention].
+   >
+   > The dominant sequence transduction models are based on complex recurrent or convolutional neural networks that include an encoder and a decoder.
+
+3. **Watch the Problems panel:** within seconds it flags the copied wording in both sentences.
+4. **Audit citations:** it catches that the BERT claim is cited to the *Transformer* paper, and offers *"Cite Devlin et al., 2018 instead"*.
+5. **Check the numbers:** upload a CSV with `model,bleu` rows (e.g. `transformer-big,28.4`), then write "transformer-big reaches 28.1 BLEU". It's flagged with a **Use 28.4** fix.
+6. **Build a matrix:** click **+** on `/matrices`, keep the suggested columns, and watch the table fill. Click a cell to see its source passage, then **Save as dataset** → **Create figure**.
+7. **Submit:** **Export** → *IEEE conference*, and upload the zip to Overleaf.
 
 ---
 
@@ -88,8 +130,8 @@ Researchers already have good tools for each step: reference managers, notebooks
 ```mermaid
 flowchart TD
     subgraph Client ["Frontend · Next.js 14 · Monaco · Tailwind"]
-        UI[IDE workspace]
-        Editor[Draft editor + preview]
+        Editor[Manuscript editor + Problems panel]
+        Matrix[Literature matrix]
         Review[Review panel and history]
         Chat[Grounded chat]
         Proxy["/api/v1 proxy route"]
@@ -97,6 +139,8 @@ flowchart TD
 
     subgraph Backend ["Backend · FastAPI · Python 3.11"]
         API[REST + SSE routers]
+        Lint[Paper linter · citation audit · data and wording checks]
+        Fill[Matrix filler]
         Ingest[Paper ingestion]
         Search[Hybrid search · RRF]
         Agent[Gemini chat agent]
@@ -111,8 +155,16 @@ flowchart TD
         Gemini[Google Gemini API]
     end
 
-    UI --> Proxy --> API
-    API --> Ingest & Search & Agent & Writing & Figures
+    Editor --> Proxy
+    Matrix --> Proxy
+    Review --> Proxy
+    Chat --> Proxy
+    Proxy --> API
+    API --> Lint & Fill & Ingest & Search & Agent & Writing & Figures
+    Lint --> Search
+    Lint --> Gemini
+    Fill --> Search
+    Fill --> Gemini
     Ingest --> GROBID
     Ingest --> Files
     Ingest --> Gemini
@@ -122,12 +174,11 @@ flowchart TD
     Agent --> Gemini
     Writing --> PG
     Figures --> Files
-    Figures --> PG
 ```
 
-- The browser only talks to the Next.js server, which proxies `/api/v1/*` to the backend inside Docker (`frontend/src/app/api/v1/[...path]/route.ts`).
-- PDFs, datasets and figures are stored in a Docker volume (`STORAGE_BACKEND=local`). S3 / MinIO is supported via `STORAGE_BACKEND=s3`, but it isn't part of the default compose file.
-- Paper parsing uses **GROBID** when it's running and falls back to **PyMuPDF** otherwise.
+- The browser only talks to the Next.js server, which proxies `/api/v1/*` to the backend inside Docker.
+- PDFs, datasets and figures live in a Docker volume (`STORAGE_BACKEND=local`); S3 / MinIO is supported via `STORAGE_BACKEND=s3`.
+- Paper parsing uses **GROBID** when it's running and falls back to **PyMuPDF** otherwise. Papers interrupted mid-import are re-ingested automatically at startup.
 
 ## 🛠️ Tech stack
 
@@ -136,7 +187,7 @@ flowchart TD
 | Frontend | Next.js 14 (App Router), TypeScript, Tailwind CSS, shadcn/ui, Monaco Editor (+ diff editor), Zustand, react-markdown + KaTeX |
 | Backend | FastAPI, SQLAlchemy 2 (async), Pydantic v2, pandas, matplotlib, PyMuPDF, tiktoken |
 | Database | PostgreSQL 16 + pgvector (HNSW cosine index) + full-text search |
-| AI | Google Gemini: `gemini-3.5-flash` for chat (with fallbacks), `gemini-embedding-001` for 768-dim embeddings |
+| AI | Google Gemini: `gemini-3.5-flash` for chat, audit and matrix (with fallbacks), `gemini-embedding-001` for 768-dim embeddings |
 | Infra | Docker Compose; optional GROBID 0.8.1 |
 
 ---
@@ -207,12 +258,15 @@ All settings live in `.env` (see `.env.example`) and have defaults in `backend/a
 
 | Variable | Default | Notes |
 |---|---|---|
-| `GEMINI_API_KEY` | none | Required for live answers. Without it, chat returns a deterministic offline excerpt and embeddings use a hash-based fallback. |
-| `GEMINI_CHAT_MODEL` | `gemini-3.5-flash` | Primary chat model. |
+| `GEMINI_API_KEY` | none | Required for live answers, the citation audit and matrix filling. Without it, chat returns an offline excerpt, and the instant checks still work. |
+| `GEMINI_CHAT_MODEL` | `gemini-3.5-flash` | Primary model for chat, audits and the matrix. |
 | `GEMINI_FALLBACK_MODELS` | `gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-flash-lite-latest,gemini-flash-latest` | Tried in order when a model is out of quota or busy. |
 | `GEMINI_EMBEDDING_MODEL` | `gemini-embedding-001` | Truncated to 768 dimensions to match the database column. |
 
-**Gemini free tier:** about 20 requests per model per day. The fallback list stretches that to roughly 100 chats a day; if every model is exhausted, chat says so instead of hanging. For a live demo, a key with billing enabled removes the limit. Embeddings have their own quota: if it runs out, uploaded papers still work but fall back to hash embeddings, which weakens semantic search.
+**Gemini free-tier limits, and what the app does about them**
+- **Generation:** about 20 requests per model per day. The fallback list stretches that to roughly 100 a day. A citation audit costs 1 request; filling a matrix costs about 1 per 3 papers.
+- **Embeddings:** 30k tokens per minute and **1,000 passages per day**. Requests are paced automatically. When the daily limit runs out, embedding pauses until it resets; search falls back to keywords in the meantime, and a background job fills in the missing embeddings afterwards. A library of about 20 long papers can use a full day's embedding quota.
+- For a live demo, a key with billing enabled removes these limits.
 
 ---
 
@@ -242,9 +296,11 @@ All routes are under `/api/v1`. Full interactive docs are at `/docs`.
 
 | Area | Endpoints |
 |---|---|
+| **Problems & audit** | `GET /drafts/{id}/problems` (instant checks + cached audit), `POST /drafts/{id}/audit` (run the citation audit) |
+| **Literature matrix** | `GET/POST /projects/{id}/matrices`, `GET/PATCH/DELETE /matrices/{id}`, `POST /matrices/{id}/fill`, `PATCH /matrices/{id}/cells`, `POST /matrices/{id}/dataset`, `GET /matrices/{id}/table` |
 | Auth | `POST /auth/register`, `POST /auth/login`, `GET /auth/me`, `POST /auth/logout` |
 | Projects | `GET/POST /projects`, `GET/DELETE /projects/{id}`, `GET /projects/{id}/tree` |
-| Papers | `POST /projects/{id}/papers/upload`, `POST /projects/{id}/papers/import-doi`, `GET/DELETE /papers/{id}`, `GET /papers/{id}/pdf` |
+| Papers | `POST /projects/{id}/papers/upload`, `POST /projects/{id}/papers/import-doi`, `GET/DELETE /papers/{id}`, `GET /papers/{id}/pdf`, `POST /papers/{id}/reindex` |
 | Datasets | `POST /projects/{id}/datasets/upload`, `GET/DELETE /datasets/{id}`, `GET /datasets/{id}/preview`, `POST /datasets/{id}/replace` |
 | Drafts | `GET/POST /projects/{id}/drafts`, `GET/PUT/DELETE /drafts/{id}` |
 | Bibliography | `GET /projects/{id}/bibliography`, `GET /projects/{id}/bibliography.bib` |
@@ -261,14 +317,14 @@ All routes are under `/api/v1`. Full interactive docs are at `/docs`.
 ```
 backend/
   app/
-    models/      SQLAlchemy models (papers, datasets, drafts, chat, figures, versions, reviews)
+    models/      SQLAlchemy models (papers, datasets, drafts, chat, figures, versions, reviews, audits, matrices)
     routers/     FastAPI routes
-    services/    ingestion, search, Gemini agent, citations, export, figures, draft history
+    services/    audit (paper linter), matrix, ingestion, search, Gemini agent, citations, export, figures
     schemas/     Pydantic request / response models
   scripts/init_db.sql   pgvector extension and base schema
 frontend/
   src/app/              Next.js pages and the /api/v1 proxy route
-  src/components/       editor, chat, layout and modal components
+  src/components/       editor (Problems panel, matrix, preview), chat, layout and modal components
   src/lib/              API client, types, citation helpers
   src/store/            Zustand workspace store
 docker-compose.yml
@@ -278,13 +334,13 @@ docker-compose.yml
 
 ## 🔒 Grounding policy
 
-1. Answers are built **only** from the project's indexed paper chunks and dataset schemas.
-2. If the project lacks the evidence, the agent says so instead of speculating.
-3. Every factual statement carries a citation to a specific paper, section and page.
+1. Chat answers, audit verdicts and matrix cells are built **only** from the project's own papers and datasets.
+2. If the project lacks the evidence, the assistant says so and matrix cells stay empty ("not reported") instead of guessing.
+3. Every verdict and cell keeps the passage and page it is based on, so you can check it yourself.
 
 ## ⚠️ Known limitations
 
+- **AI judgments can be wrong.** Audit verdicts and matrix cells show their evidence for that reason: treat them as a careful first pass, not a final word.
+- **Page numbers are approximate without GROBID:** the PyMuPDF fallback can treat long stretches of a paper as one section. Run the `grobid` profile for accurate sections and pages.
 - **Single-user demo auth:** requests without a login token act as the oldest account, and CORS allows any origin. Turn both off before exposing the app beyond your machine.
-- **Paper parsing:** without GROBID, the PyMuPDF fallback can produce rough section titles. Run the `grobid` profile for cleaner sections.
-- **Not built yet:** a literature-matrix view (extracting a comparison table across papers) is the natural next feature.
 - **SDK deprecation:** the backend uses the deprecated `google-generativeai` SDK; migrating to `google-genai` is planned.
