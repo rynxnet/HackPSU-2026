@@ -14,6 +14,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def _strip_nul(value):
+    """Recursively removes NUL characters from parser output."""
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    if isinstance(value, list):
+        return [_strip_nul(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _strip_nul(v) for k, v in value.items()}
+    return value
+
 class PaperIngestionService:
     """
     End-to-end ingestion pipeline:
@@ -47,6 +57,9 @@ class PaperIngestionService:
             if not parsed_data or not parsed_data.get("sections"):
                 logger.info(f"Falling back to PyMuPDF parser for paper {paper_id}")
                 parsed_data = fallback_parser.parse_pdf(pdf_bytes)
+
+            # Some PDFs contain NUL characters, which Postgres text columns reject
+            parsed_data = _strip_nul(parsed_data)
 
             # 3. Update Paper Metadata (prefer extracted info if title was default)
             extracted_title = parsed_data.get("title")
@@ -164,6 +177,68 @@ class PaperIngestionService:
         await db.commit()
         logger.info(f"Embedded {embedded}/{len(chunks)} chunks of paper {paper_id}")
         return {"chunks": len(chunks), "embedded": embedded}
+
+    async def resume_incomplete(self) -> None:
+        """
+        Runs at startup: re-ingests papers left 'pending'/'processing' by a restart mid-import
+        (from the stored PDF), then fills in any chunk embeddings that are still missing.
+        Papers are handled one at a time so the embedding quota isn't overrun.
+        """
+        await asyncio.sleep(5)
+        try:
+            async with AsyncSessionLocal() as db:
+                stuck = (await db.execute(select(Paper.id).where(Paper.parsing_status.in_(["pending", "processing"])))).scalars().all()
+                missing = (await db.execute(select(PaperChunk.paper_id).where(PaperChunk.embedding.is_(None)).distinct())).scalars().all()
+            if stuck or missing:
+                logger.info(f"Resuming {len(stuck)} interrupted ingestions and {len(missing)} papers with missing embeddings")
+            for paper_id in stuck:
+                async with AsyncSessionLocal() as db:
+                    paper = await db.get(Paper, paper_id)
+                    if not paper:
+                        continue
+                    try:
+                        pdf_bytes = storage_service.download_file(paper.s3_key)
+                    except FileNotFoundError:
+                        paper.parsing_status = "failed"
+                        await db.commit()
+                        continue
+                    # Clear anything a partial run left behind before starting over
+                    for model in (PaperChunk, PaperSection):
+                        for row in (await db.execute(select(model).where(model.paper_id == paper_id))).scalars().all():
+                            await db.delete(row)
+                    await db.commit()
+                    try:
+                        await self.ingest_paper(db, paper_id, pdf_bytes)
+                    except Exception:
+                        logger.exception(f"Resumed ingestion failed for paper {paper_id}")
+            for paper_id in missing:
+                if paper_id in stuck:
+                    continue
+                async with AsyncSessionLocal() as db:
+                    await self.embed_chunks(db, paper_id, only_missing=True)
+        except Exception as e:
+            logger.warning(f"Resuming incomplete ingestions failed: {e}")
+
+    async def backfill_loop(self, interval_seconds: int = 1200) -> None:
+        """
+        Periodically embeds chunks that are still missing vectors (e.g. after the daily
+        embedding quota ran out), so the library completes itself once the quota resets.
+        """
+        import time
+        while True:
+            await asyncio.sleep(interval_seconds)
+            if time.time() < embedding_service.paused_until:
+                continue
+            try:
+                async with AsyncSessionLocal() as db:
+                    missing = (await db.execute(select(PaperChunk.paper_id).where(PaperChunk.embedding.is_(None)).distinct())).scalars().all()
+                for paper_id in missing:
+                    if time.time() < embedding_service.paused_until:
+                        break
+                    async with AsyncSessionLocal() as db:
+                        await self.embed_chunks(db, paper_id, only_missing=True)
+            except Exception as e:
+                logger.warning(f"Embedding backfill pass failed: {e}")
 
     async def _embed_missing_later(self, paper_id: uuid.UUID, delay_seconds: int = 90) -> None:
         await asyncio.sleep(delay_seconds)

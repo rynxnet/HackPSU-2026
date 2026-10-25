@@ -10,6 +10,7 @@ import {
   FileCode,
   Columns,
   BarChart2,
+  Table2,
 } from "lucide-react";
 
 interface TabBarProps {
@@ -34,6 +35,8 @@ export function TabBar({ pane }: TabBarProps) {
         return <FileCode className="w-3.5 h-3.5 text-indigo-400" />;
       case "figure":
         return <BarChart2 className="w-3.5 h-3.5 text-emerald-400" />;
+      case "matrix":
+        return <Table2 className="w-3.5 h-3.5 text-violet-400" />;
       default:
         return null;
     }

@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
+import { useParams } from "next/navigation";
+import { NewMatrixModal } from "@/components/modals/NewMatrixModal";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { FileTreeItem } from "@/lib/types";
 import {
@@ -19,6 +21,7 @@ import {
   Clock,
   AlertCircle,
   BarChart2,
+  Table2,
 } from "lucide-react";
 
 interface FileTreeProps {
@@ -32,6 +35,10 @@ export function FileTree({ tree, onRefresh }: FileTreeProps) {
   const setImportDoiModalOpen = useWorkspaceStore((s) => s.setImportDoiModalOpen);
   const activeTabId = useWorkspaceStore((s) => s.activeTabId);
   const tabs = useWorkspaceStore((s) => s.tabs);
+
+  const params = useParams();
+  const projectId = params?.projectId as string | undefined;
+  const [matrixModalOpen, setMatrixModalOpen] = useState(false);
 
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({
     "folder-library": true,
@@ -134,6 +141,18 @@ export function FileTree({ tree, onRefresh }: FileTreeProps) {
                     <Plus className="w-3 h-3" />
                   </button>
                 )}
+                {folder.name === "matrices" && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMatrixModalOpen(true);
+                    }}
+                    title="New literature matrix"
+                    className="p-0.5 hover:text-primary transition-colors"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </button>
+                )}
                 {folder.name === "drafts" && (
                   <button
                     onClick={(e) => {
@@ -193,12 +212,19 @@ export function FileTree({ tree, onRefresh }: FileTreeProps) {
                           {item.type === "figure" && (
                             <BarChart2 className="w-3.5 h-3.5 shrink-0 text-emerald-400/90" />
                           )}
+                          {item.type === "matrix" && (
+                            <Table2 className="w-3.5 h-3.5 shrink-0 text-violet-400/90" />
+                          )}
                           <span className="truncate text-xs">{item.displayName || item.name}</span>
                         </div>
 
                         <div className="flex items-center gap-1 shrink-0 ml-1">
                           {item.type === "paper" && getStatusIcon(item.status)}
                           {item.type === "figure" && item.status === "failed" && getStatusIcon("failed")}
+                          {item.type === "matrix" && item.status === "processing" && getStatusIcon("processing")}
+                          {item.type === "matrix" && item.papers !== undefined && (
+                            <span className="text-[9px] text-muted-foreground/60 font-mono">{item.papers}p</span>
+                          )}
                           {item.type === "dataset" && item.rowCount !== undefined && (
                             <span className="text-[9px] text-muted-foreground/60 font-mono">
                               {item.rowCount}r
@@ -210,7 +236,11 @@ export function FileTree({ tree, onRefresh }: FileTreeProps) {
                   })
                 ) : (
                   <div className="px-2 py-1.5 text-[11px] text-muted-foreground/40 italic">
-                    {folder.name === "figures" ? "Open a dataset and click Create figure" : "Empty folder"}
+                    {folder.name === "figures"
+                      ? "Open a dataset and click Create figure"
+                      : folder.name === "matrices"
+                        ? "Compare papers side by side: click +"
+                        : "Empty folder"}
                   </div>
                 )}
               </div>
@@ -218,6 +248,7 @@ export function FileTree({ tree, onRefresh }: FileTreeProps) {
           </div>
         );
       })}
+      {projectId && <NewMatrixModal open={matrixModalOpen} onOpenChange={setMatrixModalOpen} projectId={projectId} />}
     </div>
   );
 }

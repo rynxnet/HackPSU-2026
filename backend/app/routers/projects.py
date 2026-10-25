@@ -10,7 +10,7 @@ from app.models.project import Project
 from app.models.paper import Paper
 from app.models.dataset import Dataset
 from app.models.draft import Draft
-from app.models.writing import Figure
+from app.models.writing import Figure, LiteratureMatrix
 from app.schemas.project import ProjectCreate, ProjectUpdate, ProjectResponse, ProjectTreeResponse
 from app.services.auth_service import get_current_user
 
@@ -120,6 +120,9 @@ async def get_project_file_tree(project_id: UUID, db: AsyncSession = Depends(get
     fig_res = await db.execute(select(Figure).where(Figure.project_id == project_id).order_by(Figure.created_at.asc()))
     figures = fig_res.scalars().all()
 
+    mx_res = await db.execute(select(LiteratureMatrix).where(LiteratureMatrix.project_id == project_id).order_by(LiteratureMatrix.created_at.asc()))
+    matrices = mx_res.scalars().all()
+
     tree = [
         {
             "id": "folder-library",
@@ -193,6 +196,23 @@ async def get_project_file_tree(project_id: UUID, db: AsyncSession = Depends(get
                     "status": "failed" if f.render_error else "completed",
                     "updated_at": f.updated_at.isoformat() if f.updated_at else None
                 } for f in figures
+            ]
+        },
+        {
+            "id": "folder-matrices",
+            "name": "matrices",
+            "type": "folder",
+            "path": "/matrices",
+            "children": [
+                {
+                    "id": str(m.id),
+                    "name": m.name,
+                    "type": "matrix",
+                    "path": f"/matrices/{m.id}",
+                    "status": "processing" if m.status == "filling" else ("failed" if m.status == "error" else "completed"),
+                    "papers": len(m.paper_ids or []),
+                    "updated_at": m.updated_at.isoformat() if m.updated_at else None
+                } for m in matrices
             ]
         }
     ]

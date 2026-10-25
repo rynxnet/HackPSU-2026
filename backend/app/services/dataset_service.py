@@ -1,4 +1,5 @@
 import io
+import math
 import pandas as pd
 from typing import Dict, Any, List, Optional
 from app.services.storage_service import storage_service
@@ -48,8 +49,10 @@ class DatasetService:
         summary_stats = {}
         try:
             desc = df.describe().to_dict()
+            # Empty numeric columns produce NaN, which isn't valid JSON for the JSONB column
             summary_stats = {
-                k: {stat: round(val, 4) if isinstance(val, float) else val for stat, val in v.items()}
+                str(k): {stat: (None if isinstance(val, float) and not math.isfinite(val) else round(val, 4) if isinstance(val, float) else val)
+                         for stat, val in v.items()}
                 for k, v in desc.items()
             }
         except Exception:

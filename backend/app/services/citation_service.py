@@ -138,3 +138,9 @@ def bibtex_file(entries: List[Dict[str, Any]]) -> str:
 
 def find_entry(entries: List[Dict[str, Any]], key: str) -> Optional[Dict[str, Any]]:
     return next((e for e in entries if e["key"] == key), None)
+
+async def project_bibliography(db, project_id) -> List[Dict[str, Any]]:
+    """Bibliography for a project. Oldest papers first so citation keys stay stable as papers are added."""
+    from sqlalchemy import select
+    res = await db.execute(select(Paper).where(Paper.project_id == project_id).order_by(Paper.created_at.asc(), Paper.id.asc()))
+    return build_bibliography(res.scalars().all())

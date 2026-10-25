@@ -20,10 +20,13 @@ class VectorSearchService:
         query: str,
         paper_ids: Optional[List[UUID]] = None,
         top_k: int = 8,
-        rrf_k: int = 60
+        rrf_k: int = 60,
+        query_vector: Optional[List[float]] = None,
+        diversify: bool = True
     ) -> List[Dict[str, Any]]:
-        # 1. Embed query
-        query_vector = await embedding_service.get_embedding(query)
+        # 1. Embed query (callers searching many queries can pass a precomputed vector)
+        if query_vector is None:
+            query_vector = await embedding_service.get_embedding(query)
         # No query vector (embedding API unavailable): run keyword search only
         vector_str = "[" + ",".join(f"{x:.6f}" for x in query_vector) + "]" if query_vector else None
 
@@ -136,7 +139,7 @@ class VectorSearchService:
 
         # Sort descending by fused score
         sorted_results = sorted(scored_items.values(), key=lambda x: x["score"], reverse=True)
-        return self._diversify(sorted_results, top_k)
+        return self._diversify(sorted_results, top_k) if diversify else sorted_results[:top_k]
 
     @staticmethod
     def _diversify(ranked: List[Dict[str, Any]], top_k: int) -> List[Dict[str, Any]]:

@@ -7,6 +7,7 @@ from app.routers.chat import router as chat_router
 from app.routers.search import router as search_router
 from app.routers.writing import router as writing_router
 from app.routers.figures import router as figures_router
+from app.routers.matrices import router as matrices_router
 
 __all__ = [
     "auth_router",
@@ -18,4 +19,5 @@ __all__ = [
     "search_router",
     "writing_router",
     "figures_router",
+    "matrices_router",
 ]

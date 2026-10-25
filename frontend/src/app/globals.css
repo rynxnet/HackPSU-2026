@@ -59,3 +59,19 @@
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.25);
 }
+
+/* Problems panel: compiler-style underlines in the draft editor */
+.monaco-editor .problem-error {
+  text-decoration: underline wavy #f87171;
+  text-decoration-skip-ink: none;
+  text-underline-offset: 3px;
+}
+.monaco-editor .problem-warning {
+  text-decoration: underline wavy #fbbf24;
+  text-decoration-skip-ink: none;
+  text-underline-offset: 3px;
+}
+.monaco-editor .problem-info {
+  text-decoration: underline dotted #38bdf8;
+  text-underline-offset: 3px;
+}

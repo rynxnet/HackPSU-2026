@@ -1,4 +1,5 @@
 import asyncio
+import re
 import json
 import logging
 from typing import AsyncGenerator, List, Dict, Any, Optional
@@ -59,7 +60,7 @@ class GeminiChatAgent:
         fallbacks = [m.strip() for m in (settings.GEMINI_FALLBACK_MODELS or "").split(",") if m.strip()]
         return list(dict.fromkeys([self.model_name, *fallbacks]))
 
-    async def _start_generation(self, prompt: str, stream: bool):
+    async def _start_generation(self, prompt: str, stream: bool, generation_config: Optional[Dict[str, Any]] = None):
         """
         Starts a generation on the first model that accepts the request.
         For streaming, returns (model_name, first_chunk, response) so quota errors
@@ -74,6 +75,7 @@ class GeminiChatAgent:
                     model.generate_content_async(
                         prompt,
                         stream=stream,
+                        generation_config=generation_config,
                         request_options={"retry": None, "timeout": settings.GEMINI_TIMEOUT_SECONDS}
                     ),
                     timeout=settings.GEMINI_TIMEOUT_SECONDS
@@ -95,6 +97,21 @@ class GeminiChatAgent:
             raise GeminiUnavailableError("GEMINI_API_KEY is not set")
         _, _, response = await self._start_generation(prompt, stream=False)
         return _response_text(response).strip()
+
+    async def generate_json(self, prompt: str) -> Any:
+        """Like generate_text, but asks the model for JSON and parses it. Raises GeminiUnavailableError / ValueError."""
+        if not settings.GEMINI_API_KEY:
+            raise GeminiUnavailableError("GEMINI_API_KEY is not set")
+        model_used, _, response = await self._start_generation(
+            prompt, stream=False, generation_config={"response_mime_type": "application/json", "temperature": 0.1}
+        )
+        raw = _response_text(response).strip()
+        # Some models still wrap JSON in a code fence
+        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"{model_used} returned invalid JSON: {e}") from e
 
     def _unavailable_message(self, err: Exception) -> str:
         return (

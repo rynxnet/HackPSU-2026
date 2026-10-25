@@ -1,4 +1,4 @@
-export type ResourceType = "paper" | "dataset" | "draft" | "figure" | "folder";
+export type ResourceType = "paper" | "dataset" | "draft" | "figure" | "matrix" | "folder";
 
 export interface Project {
   id: string;
@@ -130,6 +130,87 @@ export interface ExportTemplate {
   description: string;
 }
 
+export type ProblemKind =
+  | "unknown_citation" | "missing_figure" | "close_paraphrase" | "data_mismatch"
+  | "misattributed" | "unsupported" | "overstated" | "uncited" | "open_review";
+
+export interface ProblemSource {
+  paper_id: string;
+  paper_title?: string;
+  key?: string;
+  page?: number;
+  section?: string;
+  snippet?: string;
+}
+
+export interface Problem {
+  id: string;
+  kind: ProblemKind;
+  severity: "error" | "warning" | "info";
+  title: string;
+  message: string;
+  excerpt: string; // sentence (or token) in the draft the problem refers to
+  match?: string | null; // exact text to underline inside the excerpt
+  source?: ProblemSource | null;
+  fix?: { label: string; find: string; replace: string } | null;
+  dataset?: { id: string; name: string; row: string; column: string; value: string };
+}
+
+export interface ProblemsResponse {
+  summary: {
+    errors: number;
+    warnings: number;
+    infos: number;
+    sentences: number;
+    audit: {
+      ran: boolean;
+      stale?: boolean;
+      audited_at?: string;
+      claims?: number;
+      supported?: number;
+      misattributed?: number;
+      unsupported?: number;
+      uncited?: number;
+      partial?: number;
+    };
+  };
+  problems: Problem[];
+}
+
+export interface MatrixColumn {
+  name: string;
+  question: string;
+  type: "text" | "number" | "yes_no";
+}
+
+export interface MatrixCellValue {
+  value: string | null;
+  evidence?: { page?: number; section?: string; snippet?: string } | null;
+  edited?: boolean;
+}
+
+export interface MatrixRow {
+  paper_id: string;
+  title: string;
+  key?: string;
+  short?: string;
+  year?: number;
+  status: string;
+  cells: Record<string, MatrixCellValue>;
+}
+
+export interface LiteratureMatrix {
+  id: string;
+  project_id: string;
+  name: string;
+  columns: MatrixColumn[];
+  status: "idle" | "filling" | "error";
+  progress: { done?: number; total?: number; message?: string };
+  dataset_id?: string | null;
+  rows: MatrixRow[];
+  updated_at?: string;
+}
+
 /** Text to insert into a draft, in both supported source formats. */
 export interface DraftSnippet {
   markdown: string;
@@ -140,7 +221,7 @@ export interface TabItem {
   id: string; // unique tab instance ID
   resourceId: string;
   title: string;
-  type: "paper" | "dataset" | "draft" | "figure";
+  type: "paper" | "dataset" | "draft" | "figure" | "matrix";
   pane: "left" | "right"; // for split view support
   metadata?: {
     page?: number;
@@ -190,7 +271,7 @@ export interface SearchResultItem {
 export interface FileTreeItem {
   id: string;
   name: string;
-  type: "folder" | "paper" | "dataset" | "draft" | "figure";
+  type: "folder" | "paper" | "dataset" | "draft" | "figure" | "matrix";
   path: string;
   displayName?: string;
   status?: string;

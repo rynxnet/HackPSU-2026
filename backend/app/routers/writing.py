@@ -21,9 +21,9 @@ from app.schemas.writing import (
     ReviewCommentCreate, ReviewCommentUpdate, ReviewImportRequest, ReviewCommentResponse, SuggestionResponse,
 )
 from app.services.auth_service import get_current_user, get_owned_project, get_owned_resource
-from app.services.citation_service import build_bibliography, bibtex_file
+from app.services.citation_service import bibtex_file, project_bibliography
 from app.services.draft_history import snapshot
-from app.services import export_service
+from app.services import export_service, audit_service
 from app.services.figure_service import slugify
 from app.services.storage_service import storage_service
 from app.services.gemini_chat_agent import gemini_chat_agent, GeminiUnavailableError
@@ -31,11 +31,6 @@ from app.services.gemini_chat_agent import gemini_chat_agent, GeminiUnavailableE
 router = APIRouter(tags=["Writing"])
 
 COMMENT_STATUSES = ("open", "addressed", "declined")
-
-async def project_bibliography(db: AsyncSession, project_id: UUID) -> List[Dict[str, Any]]:
-    # Oldest first so citation keys don't change when new papers are added
-    res = await db.execute(select(Paper).where(Paper.project_id == project_id).order_by(Paper.created_at.asc(), Paper.id.asc()))
-    return build_bibliography(res.scalars().all())
 
 def _download(data: bytes, filename: str, media_type: str) -> Response:
     return Response(
@@ -133,6 +128,27 @@ async def export_draft(draft_id: UUID, payload: ExportRequest, db: AsyncSession 
         **figure_files,
     }
     return _download(export_service.build_zip(files), f"{slugify(base_name)}-{template}.zip", "application/zip")
+
+# ---------------------------------------------------------------------------
+# Problems panel ("linter" for the manuscript)
+# ---------------------------------------------------------------------------
+
+@router.get("/drafts/{draft_id}/problems")
+async def get_problems(draft_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Instant checks plus the cached citation audit. Cheap enough to call after every edit."""
+    draft = await get_owned_resource(db, Draft, draft_id, current_user, "Draft")
+    return await audit_service.draft_problems(db, draft)
+
+@router.post("/drafts/{draft_id}/audit")
+async def audit_draft(draft_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Runs the AI citation audit (one model call) and returns the refreshed problem list."""
+    draft = await get_owned_resource(db, Draft, draft_id, current_user, "Draft")
+    try:
+        return await audit_service.run_audit(db, draft)
+    except GeminiUnavailableError as e:
+        raise HTTPException(status_code=503, detail=f"Gemini is unavailable right now ({e}). Instant checks still work; try the audit again later.")
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=f"The audit response couldn't be read: {e}. Try again.")
 
 # ---------------------------------------------------------------------------
 # Version history

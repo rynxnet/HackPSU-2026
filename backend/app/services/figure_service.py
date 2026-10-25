@@ -7,6 +7,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg") # headless rendering inside the container
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 
 from app.services.storage_service import storage_service
 
@@ -51,6 +52,24 @@ def validate_spec(spec: Dict[str, Any], columns: List[str]) -> Dict[str, Any]:
         "ylabel": spec.get("ylabel") or (", ".join(y) if chart != "histogram" else "Count"),
     }
 
+async def render_figure(fig, dataset) -> None:
+    """Re-renders a Figure from its dataset's current file. Records the error on the figure instead of raising."""
+    import asyncio
+    try:
+        df = await asyncio.to_thread(load_dataframe, dataset.s3_key, dataset.file_type)
+        spec = validate_spec(fig.spec or {}, [str(c) for c in df.columns])
+        png = await asyncio.to_thread(render_png, df, spec)
+        key = f"figures/{fig.project_id}/{fig.id}.png"
+        storage_service.upload_bytes(png, key, content_type="image/png")
+        fig.s3_key = key
+        fig.spec = spec
+        fig.render_error = None
+    except Exception as e:
+        logger.warning(f"Rendering figure {fig.id} failed: {e}")
+        fig.render_error = str(e)
+    fig.version = (fig.version or 0) + 1
+
+
 def render_png(df: pd.DataFrame, spec: Dict[str, Any]) -> bytes:
     """Renders a publication-style chart (white background, 300 dpi) and returns PNG bytes."""
     chart, x, ys = spec["chart"], spec["x"], spec["y"]
@@ -61,7 +80,7 @@ def render_png(df: pd.DataFrame, spec: Dict[str, Any]) -> bytes:
         elif chart == "bar":
             # Average repeated x values so each category gets one bar per series
             grouped = df.groupby(x, sort=False)[ys].mean(numeric_only=True)
-            grouped.plot(kind="bar", ax=ax, rot=0, legend=len(ys) > 1, width=0.75)
+            grouped.plot(kind="bar", ax=ax, rot=0, legend=False, width=0.75)
             # Tilt category labels when they would collide (many bars or long names)
             label_chars = sum(len(str(v)) for v in grouped.index)
             if len(grouped) > 8 or label_chars > 55:
@@ -69,14 +88,19 @@ def render_png(df: pd.DataFrame, spec: Dict[str, Any]) -> bytes:
         elif chart == "scatter":
             for y in ys:
                 ax.scatter(df[x], df[y], s=14, alpha=0.8, label=y)
-            if len(ys) > 1:
-                ax.legend(frameon=False)
         else:
             data = df.sort_values(x) if pd.api.types.is_numeric_dtype(df[x]) or pd.api.types.is_datetime64_any_dtype(df[x]) else df
             for y in ys:
                 ax.plot(data[x], data[y], marker="o" if len(data) <= 30 else None, markersize=3, linewidth=1.5, label=y)
-            if len(ys) > 1:
-                ax.legend(frameon=False)
+
+        if len(ys) > 1:
+            # Legend beside the plot so it never covers data
+            ax.legend(frameon=False, loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=8)
+        # Counts and other whole-number series shouldn't get fractional ticks
+        plotted = [x] if chart == "histogram" else ys
+        values = pd.concat([pd.to_numeric(df[c], errors="coerce") for c in plotted]).dropna()
+        if chart == "histogram" or (len(values) and (values % 1 == 0).all()):
+            ax.yaxis.set_major_locator(MaxNLocator(integer=True))
 
         if spec.get("title"):
             ax.set_title(spec["title"], fontsize=11)

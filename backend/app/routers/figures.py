@@ -15,7 +15,7 @@ from app.models.writing import Figure
 from app.schemas.writing import FigureCreate, FigureUpdate, FigureResponse, DatasetReplaceResponse
 from app.services.auth_service import get_current_user, get_owned_project, get_owned_resource
 from app.services.dataset_service import dataset_service
-from app.services.figure_service import load_dataframe, validate_spec, render_png, slugify
+from app.services.figure_service import validate_spec, slugify, render_figure
 from app.services.storage_service import storage_service
 
 logger = logging.getLogger(__name__)
@@ -39,21 +39,7 @@ def _to_response(fig: Figure, dataset_name: Optional[str] = None) -> FigureRespo
         updated_at=fig.updated_at,
     )
 
-async def _render(fig: Figure, dataset: Dataset) -> None:
-    """Re-renders the figure from the dataset's current file. Records the error instead of raising."""
-    try:
-        df = await asyncio.to_thread(load_dataframe, dataset.s3_key, dataset.file_type)
-        spec = validate_spec(fig.spec or {}, [str(c) for c in df.columns])
-        png = await asyncio.to_thread(render_png, df, spec)
-        key = f"figures/{fig.project_id}/{fig.id}.png"
-        storage_service.upload_bytes(png, key, content_type="image/png")
-        fig.s3_key = key
-        fig.spec = spec
-        fig.render_error = None
-    except Exception as e:
-        logger.warning(f"Rendering figure {fig.id} failed: {e}")
-        fig.render_error = str(e)
-    fig.version = (fig.version or 0) + 1
+_render = render_figure
 
 async def _unique_label(db: AsyncSession, project_id: UUID, base: str) -> str:
     res = await db.execute(select(Figure.label).where(Figure.project_id == project_id))

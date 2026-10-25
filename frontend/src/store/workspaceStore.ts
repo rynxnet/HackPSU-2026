@@ -85,7 +85,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   uploadModalOpen: false,
   importDoiModalOpen: false,
   newProjectModalOpen: false,
-  chatCollapsed: false,
+  chatCollapsed: true, // the manuscript is the main view; chat opens as a side tool
   sidebarCollapsed: false,
   chatFocusTrigger: 0,
 

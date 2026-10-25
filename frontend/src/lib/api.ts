@@ -1,6 +1,7 @@
 import {
   Project, Paper, Dataset, Draft, ChatSession, ChatMessage, SearchResultItem, FileTreeItem,
-  BibEntry, ExportTemplate, DraftVersion, ReviewComment, Figure, FigureSpec,
+  BibEntry, ExportTemplate, DraftVersion, ReviewComment, Figure, FigureSpec, ProblemsResponse,
+  LiteratureMatrix, MatrixColumn, DraftSnippet,
 } from "./types";
 
 // Always use relative path so Next.js rewrites proxy requests to backend inside docker
@@ -214,6 +215,40 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ template }),
     });
+  },
+
+  // Problems panel ("linter" for the manuscript)
+  async getProblems(draftId: string): Promise<ProblemsResponse> {
+    return request<ProblemsResponse>(`/drafts/${draftId}/problems`);
+  },
+  async runAudit(draftId: string): Promise<ProblemsResponse> {
+    return request<ProblemsResponse>(`/drafts/${draftId}/audit`, { method: "POST" });
+  },
+
+  // Literature matrix
+  async createMatrix(projectId: string, name: string, columns: MatrixColumn[]): Promise<LiteratureMatrix> {
+    return request<LiteratureMatrix>(`/projects/${projectId}/matrices`, { method: "POST", body: JSON.stringify({ name, columns }) });
+  },
+  async getMatrix(matrixId: string): Promise<LiteratureMatrix> {
+    return request<LiteratureMatrix>(`/matrices/${matrixId}`);
+  },
+  async updateMatrix(matrixId: string, updates: { name?: string; columns?: MatrixColumn[] }): Promise<LiteratureMatrix> {
+    return request<LiteratureMatrix>(`/matrices/${matrixId}`, { method: "PATCH", body: JSON.stringify(updates) });
+  },
+  async fillMatrix(matrixId: string, columns?: string[], onlyEmpty = true): Promise<LiteratureMatrix> {
+    return request<LiteratureMatrix>(`/matrices/${matrixId}/fill`, { method: "POST", body: JSON.stringify({ columns, only_empty: onlyEmpty }) });
+  },
+  async updateMatrixCell(matrixId: string, paperId: string, column: string, value: string | null): Promise<void> {
+    await request(`/matrices/${matrixId}/cells`, { method: "PATCH", body: JSON.stringify({ paper_id: paperId, column, value }) });
+  },
+  async matrixToDataset(matrixId: string): Promise<{ dataset_id: string; name: string; rows: number; figures_updated: number }> {
+    return request(`/matrices/${matrixId}/dataset`, { method: "POST" });
+  },
+  async matrixTable(matrixId: string): Promise<DraftSnippet> {
+    return request<DraftSnippet>(`/matrices/${matrixId}/table`);
+  },
+  async deleteMatrix(matrixId: string): Promise<void> {
+    await request(`/matrices/${matrixId}`, { method: "DELETE" });
   },
 
   // Draft version history

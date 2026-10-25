@@ -3,10 +3,11 @@
 import React, { useCallback, useEffect, useState, useRef } from "react";
 import Editor, { OnMount } from "@monaco-editor/react";
 import { api } from "@/lib/api";
-import { Draft, Figure } from "@/lib/types";
+import { Draft, Figure, Problem, ProblemsResponse } from "@/lib/types";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { DraftPreview } from "./DraftPreview";
 import { ReviewPanel } from "./ReviewPanel";
+import { ProblemsPanel, HealthBadge } from "./ProblemsPanel";
 import { CitePickerModal } from "@/components/modals/CitePickerModal";
 import { FigurePickerModal } from "@/components/modals/FigurePickerModal";
 import { ExportModal } from "@/components/modals/ExportModal";
@@ -98,6 +99,7 @@ export function MonacoEditorPane({ draftId }: MonacoEditorPaneProps) {
   const treeVersion = useWorkspaceStore((s) => s.treeVersion);
   const setDraftTarget = useWorkspaceStore((s) => s.setDraftTarget);
   const detachDraftTarget = useWorkspaceStore((s) => s.detachDraftTarget);
+  const pushToast = useWorkspaceStore((s) => s.pushToast);
 
   useEffect(() => {
     api.getDraft(draftId)
@@ -240,6 +242,124 @@ export function MonacoEditorPane({ draftId }: MonacoEditorPaneProps) {
     setSavingStatus("saved");
   };
 
+  // ---------------------------------------------------------------------------
+  // Problems ("linter" for the manuscript)
+  // ---------------------------------------------------------------------------
+  const [problems, setProblems] = useState<ProblemsResponse | null>(null);
+  const [problemsLoading, setProblemsLoading] = useState(false);
+  const [auditing, setAuditing] = useState(false);
+  const [problemsOpen, setProblemsOpen] = useState(true);
+  const decorationsRef = useRef<{ clear: () => void; set: (d: any[]) => void } | null>(null);
+  const problemsSeq = useRef(0);
+
+  const refreshProblems = useCallback(async () => {
+    const seq = ++problemsSeq.current;
+    setProblemsLoading(true);
+    try {
+      const data = await api.getProblems(draftId);
+      if (seq === problemsSeq.current) setProblems(data);
+    } catch {
+      // the panel keeps showing the last result
+    } finally {
+      if (seq === problemsSeq.current) setProblemsLoading(false);
+    }
+  }, [draftId]);
+
+  // Re-check shortly after each autosave, like an IDE re-linting after you stop typing
+  useEffect(() => {
+    if (!draft || savingStatus !== "saved") return;
+    const t = setTimeout(refreshProblems, 1500);
+    return () => clearTimeout(t);
+  }, [draft, savingStatus, refreshProblems]);
+
+  /** Range of a problem in the editor: its exact token if given, else the whole sentence. */
+  const problemRange = (p: Problem) => {
+    const model = editorRef.current?.getModel();
+    if (!model || !p.excerpt) return null;
+    const sentence = model.findMatches(p.excerpt, false, false, true, null, false)[0];
+    if (!sentence) return null;
+    if (p.match) {
+      const startOffset = model.getOffsetAt({ lineNumber: sentence.range.startLineNumber, column: sentence.range.startColumn });
+      const idx = p.excerpt.indexOf(p.match);
+      if (idx >= 0) {
+        const start = model.getPositionAt(startOffset + idx);
+        const end = model.getPositionAt(startOffset + idx + p.match.length);
+        return { startLineNumber: start.lineNumber, startColumn: start.column, endLineNumber: end.lineNumber, endColumn: end.column };
+      }
+    }
+    return sentence.range;
+  };
+
+  // Squiggly underlines with hover explanations, like compiler errors
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !problems) return;
+    if (!decorationsRef.current) {
+      const collection = (editor as any).createDecorationsCollection([]);
+      decorationsRef.current = { clear: () => collection.clear(), set: (d) => collection.set(d) };
+    }
+    const decos = problems.problems
+      .filter((p) => p.kind !== "open_review")
+      .map((p) => {
+        const range = problemRange(p);
+        if (!range) return null;
+        return {
+          range,
+          options: {
+            inlineClassName: `problem-${p.severity}`,
+            hoverMessage: { value: `**${p.title}**\n\n${p.message}${p.fix ? `\n\n_Fix in the Problems panel: ${p.fix.label}_` : ""}` },
+            overviewRuler: { color: p.severity === "error" ? "#f87171" : p.severity === "warning" ? "#fbbf24" : "#38bdf8", position: 4 },
+          },
+        };
+      })
+      .filter(Boolean);
+    decorationsRef.current.set(decos as any[]);
+  }, [problems, content]);
+
+  const locateProblem = (p: Problem) => {
+    const editor = editorRef.current;
+    const range = problemRange(p);
+    if (!editor || !range) {
+      if (p.excerpt) pushToast("That text is no longer in the draft.", "info");
+      return;
+    }
+    editor.setSelection(range as any);
+    editor.revealRangeInCenter(range as any);
+    editor.focus();
+  };
+
+  const applyFix = (p: Problem) => {
+    const editor = editorRef.current;
+    const model = editor?.getModel();
+    if (!editor || !model || !p.fix) return;
+    const match = model.findMatches(p.fix.find, false, false, true, null, false)[0];
+    if (!match) {
+      pushToast("That text has changed since the check ran. Re-checking…", "info");
+      refreshProblems();
+      return;
+    }
+    editor.executeEdits("researchide-fix", [{ range: match.range, text: p.fix.replace, forceMoveMarkers: true }]);
+    editor.pushUndoStop();
+    setProblems((prev) => (prev ? { ...prev, problems: prev.problems.filter((x) => x.id !== p.id) } : prev));
+    pushToast(`Applied: ${p.fix.label}`, "success");
+  };
+
+  const runAudit = async () => {
+    setAuditing(true);
+    setProblemsOpen(true);
+    try {
+      await flushSave();
+      const data = await api.runAudit(draftId);
+      setProblems(data);
+      const a = data.summary.audit;
+      pushToast(`Audit checked ${a.claims ?? 0} claims: ${a.supported ?? 0} verified, ${(a.claims ?? 0) - (a.supported ?? 0)} need attention.`, "success");
+    } catch (e: any) {
+      pushToast(e.message || "Audit failed", "error");
+    } finally {
+      setAuditing(false);
+    }
+  };
+
   if (!draft) {
     return (
       <div className="h-full flex items-center justify-center text-muted-foreground text-xs">
@@ -298,6 +418,11 @@ export function MonacoEditorPane({ draftId }: MonacoEditorPaneProps) {
         />
         <div className="flex-1" />
         {canCite && (
+          <div className="mr-1.5">
+            <HealthBadge data={problems} loading={problemsLoading} onClick={() => setProblemsOpen((v) => !v)} />
+          </div>
+        )}
+        {canCite && (
           <button
             onClick={() => setModal("export")}
             className="flex items-center gap-1 px-2.5 h-6 rounded bg-primary text-primary-foreground text-[11px] font-medium hover:bg-primary/90"
@@ -349,6 +474,20 @@ export function MonacoEditorPane({ draftId }: MonacoEditorPaneProps) {
           />
         )}
       </div>
+
+      {canCite && (
+        <ProblemsPanel
+          data={problems}
+          loading={problemsLoading}
+          auditing={auditing}
+          open={problemsOpen}
+          onToggle={() => setProblemsOpen((v) => !v)}
+          onRunAudit={runAudit}
+          onLocate={locateProblem}
+          onFix={applyFix}
+          onOpenReview={() => setShowReview(true)}
+        />
+      )}
 
       {/* Editor Status Bar */}
       <div className="h-6 border-t border-border bg-[#18181b] px-3 flex items-center justify-between text-[11px] text-muted-foreground select-none">

@@ -138,9 +138,41 @@ def markdown_to_latex(markdown: str, known_keys: set, figures: Dict[str, Dict[st
             out.append("\\end{quote}")
             in_quote = False
 
+    table_rows: List[str] = []
+
+    def flush_table():
+        """Converts a buffered Markdown pipe table into a LaTeX table."""
+        if not table_rows:
+            return
+        rows = [[c.strip() for c in r.strip().strip("|").split("|")] for r in table_rows
+                if not re.match(r"^\|?\s*:?-{3,}", r.strip())]
+        table_rows.clear()
+        if not rows:
+            return
+        ncols = max(len(r) for r in rows)
+        width = f"{0.95 / max(ncols, 1):.2f}"
+        out.append("\\begin{table*}[htbp]")
+        out.append("  \\centering\\small")
+        out.append(f"  \\begin{{tabular}}{{{'p{' + width + chr(92) + 'linewidth}'}{('p{' + width + chr(92) + 'linewidth}') * (ncols - 1)}}}")
+        out.append("    \\hline")
+        for i, r in enumerate(rows):
+            cells = [_inline(c, known_keys) for c in r] + [""] * (ncols - len(r))
+            out.append("    " + " & ".join(cells) + " \\\\")
+            if i == 0:
+                out.append("    \\hline")
+        out.append("    \\hline")
+        out.append("  \\end{tabular}")
+        out.append("\\end{table*}")
+
     first_content_seen = False
     for raw in lines:
         line = raw.rstrip()
+
+        if not in_code and line.strip().startswith("|"):
+            close_lists(); close_quote()
+            table_rows.append(line)
+            continue
+        flush_table()
 
         if in_code:
             if line.strip().startswith("```"):
@@ -229,6 +261,7 @@ def markdown_to_latex(markdown: str, known_keys: set, figures: Dict[str, Dict[st
 
         out.append(_inline(line, known_keys))
 
+    flush_table()
     close_lists(); close_quote()
     if in_code:
         out.append("\\end{verbatim}")

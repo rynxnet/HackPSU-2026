@@ -1,9 +1,11 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import engine, Base
+from app.services.paper_ingestion import paper_ingestion_service
 from app.routers import (
     auth_router,
     projects_router,
@@ -14,6 +16,7 @@ from app.routers import (
     search_router,
     writing_router,
     figures_router,
+    matrices_router,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -29,7 +32,13 @@ async def lifespan(app: FastAPI):
         logger.info("Database schemas verified.")
     except Exception as e:
         logger.warning(f"Database table verification notice: {e}")
+    # Any paper still "processing" at startup was interrupted (restart, reload, crash): finish it
+    resume_task = asyncio.create_task(paper_ingestion_service.resume_incomplete())
+    # Fills in embeddings that couldn't be made earlier (e.g. daily quota) once the quota is back
+    backfill_task = asyncio.create_task(paper_ingestion_service.backfill_loop())
     yield
+    resume_task.cancel()
+    backfill_task.cancel()
     logger.info("Shutting down ResearchIDE Backend...")
 
 app = FastAPI(
@@ -60,6 +69,7 @@ app.include_router(chat_router, prefix=api_v1)
 app.include_router(search_router, prefix=api_v1)
 app.include_router(writing_router, prefix=api_v1)
 app.include_router(figures_router, prefix=api_v1)
+app.include_router(matrices_router, prefix=api_v1)
 
 @app.get("/health")
 @app.get(f"{api_v1}/health")
